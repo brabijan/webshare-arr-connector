@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  webshare-downloader:
+    build: .
+    container_name: webshare-downloader
+    restart: unless-stopped
+    ports:
+      - "5050:5050"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      # Webshare credentials
+      - WEBSHARE_USER=${WEBSHARE_USER:-mates91}
+      - WEBSHARE_PASS=${WEBSHARE_PASS:-afdm54F3}
+
+      # pyLoad settings
+      - PYLOAD_URL=${PYLOAD_URL:-http://pyload.homelab.carpiftw.cz}
+      - PYLOAD_USER=${PYLOAD_USER:-admin}
+      - PYLOAD_PASS=${PYLOAD_PASS:-admin}
+
+      # Sonarr settings
+      - SONARR_URL=${SONARR_URL:-http://sonarr:8989}
+      - SONARR_API_KEY=${SONARR_API_KEY}
+
+      # Radarr settings
+      - RADARR_URL=${RADARR_URL:-http://radarr:7878}
+      - RADARR_API_KEY=${RADARR_API_KEY}
+
+      # Search preferences
+      - PREFER_CZECH=${PREFER_CZECH:-true}
+      - MIN_QUALITY=${MIN_QUALITY:-720p}
+      - MAX_SIZE_GB=${MAX_SIZE_GB:-50}
+      - SEARCH_LIMIT=${SEARCH_LIMIT:-50}
+
+      # Cache settings
+      - CACHE_TTL_DAYS=${CACHE_TTL_DAYS:-7}
+      - HISTORY_TTL_DAYS=${HISTORY_TTL_DAYS:-30}
+
+      # Flask settings
+      - SECRET_KEY=${SECRET_KEY:-change-this-in-production}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.webshare-downloader.rule=Host(`webshare-downloader.homelab.carpiftw.cz`)"
+      - "traefik.http.routers.webshare-downloader.entrypoints=websecure"
+      - "traefik.http.routers.webshare-downloader.tls.certresolver=letsencrypt"
+      - "traefik.http.services.webshare-downloader.loadbalancer.server.port=5050"
+
+networks:
+  default:
+    name: homelab
+    external: true

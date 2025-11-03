@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}Pending Downloads - Webshare Downloader{% endblock %}
+
+{% block content %}
+<h1>Pending Downloads</h1>
+
+<div style="margin-bottom: 30px; display: flex; gap: 10px;">
+    <button onclick="fetchMissing('sonarr')" class="btn btn-primary">Fetch Missing from Sonarr</button>
+    <button onclick="fetchMissing('radarr')" class="btn btn-primary">Fetch Missing from Radarr</button>
+</div>
+
+<script>
+async function fetchMissing(source) {
+    const button = event.target;
+    button.disabled = true;
+    button.textContent = `Fetching from ${source}...`;
+
+    try {
+        const response = await fetch('/api/fetch-missing', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({source: source, limit: 10})
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            alert(`Success! Created ${data.pending_count} pending confirmations from ${source}`);
+            location.reload();
+        } else {
+            alert(`Error: ${data.error || 'Unknown error'}`);
+        }
+    } catch (error) {
+        alert(`Error: ${error.message}`);
+    } finally {
+        button.disabled = false;
+        button.textContent = `Fetch Missing from ${source.charAt(0).toUpperCase() + source.slice(1)}`;
+    }
+}
+</script>
+
+{% if pending_items %}
+    <p style="color: #888; margin-bottom: 20px;">{{ pending_items|length }} item(s) waiting for confirmation</p>
+
+    {% for item in pending_items %}
+        <div class="pending-item">
+            <div class="item-header">
+                <div class="item-title">
+                    {% if item.source == 'sonarr' %}
+                        {{ item.item_title }} - S{{ "%02d"|format(item.season) }}E{{ "%02d"|format(item.episode) }}
+                    {% else %}
+                        {{ item.item_title }} ({{ item.year }})
+                    {% endif %}
+                </div>
+                <div class="item-meta">
+                    Source: {{ item.source|upper }} |
+                    Query: {{ item.search_query }} |
+                    Found {{ item.results|length }} results |
+                    Created: {{ item.created_at.strftime('%Y-%m-%d %H:%M') }}
+                </div>
+            </div>
+
+            <div class="results-grid">
+                {% for result in item.results %}
+                    <div class="result-card">
+                        <div class="result-title">{{ result.name }}</div>
+
+                        <div class="result-meta">
+                            {% if result.parsed.quality %}
+                                <span class="badge badge-quality">{{ result.parsed.quality }}</span>
+                            {% endif %}
+
+                            {% if result.parsed.has_czech %}
+                                <span class="badge badge-czech">CZ</span>
+                            {% endif %}
+
+                            {% if result.parsed.language %}
+                                <span class="badge badge-lang">{{ result.parsed.language }}</span>
+                            {% endif %}
+
+                            {% if result.parsed.source %}
+                                <span class="badge badge-lang">{{ result.parsed.source }}</span>
+                            {% endif %}
+
+                            {% if result.file_size_gb %}
+                                <span class="badge badge-size">{{ "%.2f"|format(result.file_size_gb) }} GB</span>
+                            {% endif %}
+
+                            <span class="badge badge-score">Score: {{ result.score.total }}</span>
+                        </div>
+
+                        <form method="POST" action="/download" style="display: inline;">
+                            <input type="hidden" name="pending_id" value="{{ item.id }}">
+                            <input type="hidden" name="result_index" value="{{ loop.index0 }}">
+                            <button type="submit" class="btn btn-primary">Download This</button>
+                        </form>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endfor %}
+{% else %}
+    <div class="empty-state">
+        <h3>No pending downloads</h3>
+        <p>Webhooks from Sonarr/Radarr will appear here</p>
+    </div>
+{% endif %}
+{% endblock %}

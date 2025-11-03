@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  webshare-app:
+    build: .
+    container_name: webshare-app
+    restart: unless-stopped
+    networks:
+      - proxy
+    environment:
+      - WEBSHARE_USER=mates91
+      - WEBSHARE_PASS=afdm54F3
+      - PYLOAD_URL=https://pyload.homelab.carpiftw.cz
+      - PYLOAD_USER=pyload
+      - PYLOAD_PASS=v4G#2uPXj5dvL9%aWHLs
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.webshare-app.rule=Host(`webshare.homelab.carpiftw.cz`)"
+      - "traefik.http.routers.webshare-app.entrypoints=websecure"
+      - "traefik.http.routers.webshare-app.tls=true"
+      - "traefik.http.routers.webshare-app.tls.certresolver=cloudflare"
+      - "traefik.http.services.webshare-app.loadbalancer.server.port=5000"
+
+networks:
+  proxy:
+    external: true

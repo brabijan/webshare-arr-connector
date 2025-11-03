@@ -1,0 +1,146 @@
+"""Web UI routes"""
+from flask import Blueprint, render_template, request, redirect, url_for, flash
+import logging
+from models.database import PendingConfirmation, DownloadHistory, get_db_session
+from services import webshare, pyload
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+web_bp = Blueprint('web', __name__)
+
+
+@web_bp.route('/')
+def index():
+    """Main page with pending confirmations"""
+    try:
+        db = get_db_session()
+        try:
+            pending_items = db.query(PendingConfirmation).filter(
+                PendingConfirmation.status == 'pending'
+            ).order_by(PendingConfirmation.created_at.desc()).all()
+
+            return render_template('index.html', pending_items=pending_items)
+
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"Error loading index: {e}", exc_info=True)
+        return render_template('index.html', pending_items=[], error=str(e))
+
+
+@web_bp.route('/download', methods=['POST'])
+def download():
+    """Handle download confirmation from web form"""
+    try:
+        pending_id = request.form.get('pending_id', type=int)
+        result_index = request.form.get('result_index', type=int)
+
+        if not pending_id or result_index is None:
+            flash('Invalid request', 'error')
+            return redirect(url_for('web.index'))
+
+        db = get_db_session()
+        try:
+            # Get pending item
+            pending = db.query(PendingConfirmation).filter(
+                PendingConfirmation.id == pending_id
+            ).first()
+
+            if not pending or pending.status != 'pending':
+                flash('Pending item not found or already processed', 'error')
+                return redirect(url_for('web.index'))
+
+            results = pending.results
+
+            if result_index >= len(results):
+                flash('Invalid selection', 'error')
+                return redirect(url_for('web.index'))
+
+            selected_result = results[result_index]
+
+            # Get direct link
+            ws_client = webshare.get_client()
+            direct_link, error = ws_client.get_direct_link(selected_result['ident'])
+
+            if error:
+                flash(f'Failed to get direct link: {error}', 'error')
+                return redirect(url_for('web.index'))
+
+            # Generate package name
+            if pending.source == 'sonarr':
+                package_name = f"{pending.item_title} - S{pending.season:02d}E{pending.episode:02d}"
+            else:
+                package_name = f"{pending.item_title} ({pending.year})"
+
+            # Add to pyLoad
+            success, message, package_id = pyload.add_to_pyload(direct_link, package_name)
+
+            if not success:
+                flash(f'Failed to add to pyLoad: {message}', 'error')
+                return redirect(url_for('web.index'))
+
+            # Update pending confirmation
+            pending.status = 'confirmed'
+            pending.selected_index = result_index
+            pending.confirmed_at = datetime.utcnow()
+
+            # Create history entry
+            history = DownloadHistory(
+                source=pending.source,
+                source_id=pending.source_id,
+                item_title=pending.item_title,
+                season=pending.season,
+                episode=pending.episode,
+                year=pending.year,
+                webshare_ident=selected_result['ident'],
+                filename=selected_result['name'],
+                file_size=selected_result.get('size'),
+                quality=selected_result.get('parsed', {}).get('quality'),
+                language=selected_result.get('parsed', {}).get('language'),
+                pyload_package_id=package_id,
+                status='sent'
+            )
+
+            db.add(history)
+            db.commit()
+
+            flash(f'Successfully sent to pyLoad: {message}', 'success')
+            return redirect(url_for('web.index'))
+
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"Error processing download: {e}", exc_info=True)
+        flash(f'Error: {str(e)}', 'error')
+        return redirect(url_for('web.index'))
+
+
+@web_bp.route('/history')
+def history():
+    """Show download history"""
+    try:
+        limit = request.args.get('limit', 50, type=int)
+
+        db = get_db_session()
+        try:
+            history_items = db.query(DownloadHistory).order_by(
+                DownloadHistory.created_at.desc()
+            ).limit(limit).all()
+
+            return render_template('history.html', history_items=history_items)
+
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"Error loading history: {e}", exc_info=True)
+        return render_template('history.html', history_items=[], error=str(e))
+
+
+@web_bp.route('/health')
+def health():
+    """Health check endpoint"""
+    return {'status': 'ok'}, 200

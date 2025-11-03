@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Download History - Webshare Downloader{% endblock %}
+
+{% block content %}
+<h1>Download History</h1>
+
+{% if history_items %}
+    <table>
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Quality</th>
+                <th>Language</th>
+                <th>Size</th>
+                <th>pyLoad Package</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in history_items %}
+                <tr>
+                    <td>
+                        <strong>
+                            {% if item.source == 'sonarr' %}
+                                {{ item.item_title }} - S{{ "%02d"|format(item.season) }}E{{ "%02d"|format(item.episode) }}
+                            {% else %}
+                                {{ item.item_title }} ({{ item.year }})
+                            {% endif %}
+                        </strong>
+                        <br>
+                        <span style="font-size: 0.85em; color: #888;">{{ item.filename[:80] }}{% if item.filename|length > 80 %}...{% endif %}</span>
+                    </td>
+                    <td>
+                        {% if item.quality %}
+                            <span class="badge badge-quality">{{ item.quality }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if item.language %}
+                            <span class="badge badge-lang">{{ item.language }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if item.file_size %}
+                            {{ "%.2f"|format(item.file_size / (1024**3)) }} GB
+                        {% endif %}
+                    </td>
+                    <td style="font-family: monospace; font-size: 0.85em;">
+                        {{ item.pyload_package_id if item.pyload_package_id else '-' }}
+                    </td>
+                    <td style="white-space: nowrap;">
+                        {{ item.created_at.strftime('%Y-%m-%d %H:%M') }}
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% else %}
+    <div class="empty-state">
+        <h3>No download history</h3>
+        <p>Downloads will appear here after confirmation</p>
+    </div>
+{% endif %}
+{% endblock %}

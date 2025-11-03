@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Webshare Downloader{% endblock %}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #fff;
+            margin-bottom: 30px;
+            font-size: 2em;
+        }
+        h2 {
+            color: #fff;
+            margin: 30px 0 20px 0;
+            font-size: 1.5em;
+        }
+        nav {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        nav a {
+            color: #4a9eff;
+            text-decoration: none;
+            margin-right: 20px;
+            font-weight: 500;
+        }
+        nav a:hover {
+            color: #6ab0ff;
+        }
+        .alert {
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .alert-success {
+            background: #2d5016;
+            border-left: 4px solid #4caf50;
+        }
+        .alert-error {
+            background: #5c1919;
+            border-left: 4px solid #f44336;
+        }
+        .pending-item {
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-left: 4px solid #4a9eff;
+        }
+        .item-header {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #3a3a3a;
+        }
+        .item-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #fff;
+            margin-bottom: 5px;
+        }
+        .item-meta {
+            color: #888;
+            font-size: 0.9em;
+        }
+        .results-grid {
+            display: grid;
+            gap: 15px;
+        }
+        .result-card {
+            background: #1f1f1f;
+            border: 1px solid #3a3a3a;
+            border-radius: 5px;
+            padding: 15px;
+            transition: all 0.2s;
+        }
+        .result-card:hover {
+            border-color: #4a9eff;
+            background: #252525;
+        }
+        .result-title {
+            color: #fff;
+            font-size: 0.95em;
+            margin-bottom: 10px;
+            word-break: break-all;
+        }
+        .result-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+        .badge {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        .badge-quality {
+            background: #1565c0;
+            color: #fff;
+        }
+        .badge-czech {
+            background: #2e7d32;
+            color: #fff;
+        }
+        .badge-lang {
+            background: #5d4037;
+            color: #fff;
+        }
+        .badge-size {
+            background: #424242;
+            color: #fff;
+        }
+        .badge-score {
+            background: #6a1b9a;
+            color: #fff;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.95em;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: #4a9eff;
+            color: #fff;
+        }
+        .btn-primary:hover {
+            background: #6ab0ff;
+        }
+        .btn-danger {
+            background: #f44336;
+            color: #fff;
+        }
+        .btn-danger:hover {
+            background: #ff5c4d;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        .empty-state h3 {
+            margin-bottom: 10px;
+            color: #888;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #2a2a2a;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th {
+            background: #1f1f1f;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #fff;
+        }
+        td {
+            padding: 12px;
+            border-top: 1px solid #3a3a3a;
+        }
+        tr:hover {
+            background: #252525;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav>
+            <a href="/">Pending Downloads</a>
+            <a href="/history">History</a>
+            <a href="/api/stats">Stats (API)</a>
+        </nav>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% if error %}
+            <div class="alert alert-error">Error: {{ error }}</div>
+        {% endif %}
+
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>
