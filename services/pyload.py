@@ -61,11 +61,8 @@ def _create_new_package():
     try:
         api_url = f"{config.PYLOAD_URL}/api/addPackage"
 
-        params = {
-            'name': DEFAULT_PACKAGE_NAME,
-            'links': [],  # Empty package
-            'dest': 1  # Queue
-        }
+        # pyLoad API expects positional arguments as JSON array: [name, [links], dest]
+        params = [DEFAULT_PACKAGE_NAME, [], 1]  # name, empty links, dest=1 (Queue)
 
         response = requests.post(
             api_url,
@@ -106,10 +103,8 @@ def add_files_to_package(package_id, links):
 
         api_url = f"{config.PYLOAD_URL}/api/addFiles"
 
-        params = {
-            'pid': package_id,
-            'links': links
-        }
+        # pyLoad API expects positional arguments as JSON array: [pid, [links]]
+        params = [int(package_id), links]
 
         logger.info(f"Adding {len(links)} file(s) to package {package_id}")
 
