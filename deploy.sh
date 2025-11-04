@@ -172,7 +172,7 @@ sleep 5
 # Health check
 MAX_RETRIES=30
 RETRY_COUNT=0
-HEALTH_URL="http://localhost:5050/api/health"
+HEALTH_URL="https://webshare-downloader.homelab.carpiftw.cz/api/health"
 
 while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
     if curl -f -s "${HEALTH_URL}" &>/dev/null; then
