@@ -1,109 +1,331 @@
 {% extends "base.html" %}
 
-{% block title %}Pending Downloads - Webshare Downloader{% endblock %}
+{% block title %}Missing Content - Webshare Downloader{% endblock %}
 
 {% block content %}
-<h1>Pending Downloads</h1>
+<h1>Missing Content</h1>
 
-<div style="margin-bottom: 30px; display: flex; gap: 10px;">
-    <button onclick="fetchMissing('sonarr')" class="btn btn-primary">Fetch Missing from Sonarr</button>
-    <button onclick="fetchMissing('radarr')" class="btn btn-primary">Fetch Missing from Radarr</button>
+<!-- Tab Navigation -->
+<div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('tv')">TV Shows</button>
+    <button class="tab-btn" onclick="switchTab('movies')">Movies</button>
 </div>
 
+<!-- Loading indicator -->
+<div id="loading" style="display: none; text-align: center; padding: 40px;">
+    <p>Loading...</p>
+</div>
+
+<!-- TV Shows Tab Content -->
+<div id="tv-content" class="tab-content active">
+    <div id="series-grid" class="media-grid"></div>
+    <div id="no-series" style="display: none;" class="empty-state">
+        <h3>No missing TV shows</h3>
+        <p>All your monitored series are up to date!</p>
+    </div>
+</div>
+
+<!-- Movies Tab Content -->
+<div id="movies-content" class="tab-content">
+    <div id="movies-grid" class="media-grid"></div>
+    <div id="no-movies" style="display: none;" class="empty-state">
+        <h3>No missing movies</h3>
+        <p>All your monitored movies have been downloaded!</p>
+    </div>
+</div>
+
+<style>
+/* Tab Navigation */
+.tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 30px;
+    border-bottom: 2px solid #333;
+}
+
+.tab-btn {
+    padding: 12px 24px;
+    background: transparent;
+    border: none;
+    color: #999;
+    font-size: 16px;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: all 0.3s;
+}
+
+.tab-btn:hover {
+    color: #fff;
+}
+
+.tab-btn.active {
+    color: #4CAF50;
+    border-bottom-color: #4CAF50;
+}
+
+/* Tab Content */
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* Media Grid */
+.media-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.media-card {
+    background: #1a1a1a;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
+}
+
+.media-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+}
+
+.media-poster {
+    width: 100%;
+    height: 270px;
+    object-fit: cover;
+    background: #2a2a2a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+    font-size: 14px;
+}
+
+.media-poster img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.media-info {
+    padding: 12px;
+}
+
+.media-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.media-year {
+    font-size: 12px;
+    color: #999;
+    margin-bottom: 8px;
+}
+
+.media-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #f44336;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #888;
+}
+
+.empty-state h3 {
+    margin-bottom: 10px;
+}
+</style>
+
 <script>
-async function fetchMissing(source) {
-    const button = event.target;
-    button.disabled = true;
-    button.textContent = `Fetching from ${source}...`;
+let currentTab = 'tv';
+let seriesData = [];
+let moviesData = [];
+
+// Switch tabs
+function switchTab(tab) {
+    currentTab = tab;
+
+    // Update tab buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+
+    // Update tab content
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    if (tab === 'tv') {
+        document.getElementById('tv-content').classList.add('active');
+        if (seriesData.length === 0) {
+            loadSeries();
+        }
+    } else {
+        document.getElementById('movies-content').classList.add('active');
+        if (moviesData.length === 0) {
+            loadMovies();
+        }
+    }
+}
+
+// Load TV series
+async function loadSeries() {
+    const loading = document.getElementById('loading');
+    const grid = document.getElementById('series-grid');
+    const noSeries = document.getElementById('no-series');
+
+    loading.style.display = 'block';
+    grid.innerHTML = '';
+    noSeries.style.display = 'none';
 
     try {
-        const response = await fetch('/api/fetch-missing', {
+        const response = await fetch('/api/series');
+        const data = await response.json();
+
+        loading.style.display = 'none';
+
+        if (data.success && data.series.length > 0) {
+            seriesData = data.series;
+            renderSeries(data.series);
+        } else {
+            noSeries.style.display = 'block';
+        }
+    } catch (error) {
+        loading.style.display = 'none';
+        alert(`Error loading series: ${error.message}`);
+    }
+}
+
+// Render series grid
+function renderSeries(series) {
+    const grid = document.getElementById('series-grid');
+    grid.innerHTML = '';
+
+    series.forEach(s => {
+        const card = document.createElement('div');
+        card.className = 'media-card';
+        card.onclick = () => window.location.href = `/series/${s.id}/seasons`;
+
+        const posterHtml = s.poster_url
+            ? `<img src="${s.poster_url}" alt="${s.title}" onerror="this.style.display='none';this.parentElement.innerHTML='No Image'"/>`
+            : 'No Image';
+
+        card.innerHTML = `
+            <div class="media-poster">${posterHtml}</div>
+            <div class="media-info">
+                <div class="media-title" title="${s.title}">${s.title}</div>
+                <div class="media-year">${s.year || 'Unknown'}</div>
+            </div>
+            <div class="media-badge">${s.missing_count} missing</div>
+        `;
+
+        grid.appendChild(card);
+    });
+}
+
+// Load movies
+async function loadMovies() {
+    const loading = document.getElementById('loading');
+    const grid = document.getElementById('movies-grid');
+    const noMovies = document.getElementById('no-movies');
+
+    loading.style.display = 'block';
+    grid.innerHTML = '';
+    noMovies.style.display = 'none';
+
+    try {
+        const response = await fetch('/api/movies');
+        const data = await response.json();
+
+        loading.style.display = 'none';
+
+        if (data.success && data.movies.length > 0) {
+            moviesData = data.movies;
+            renderMovies(data.movies);
+        } else {
+            noMovies.style.display = 'block';
+        }
+    } catch (error) {
+        loading.style.display = 'none';
+        alert(`Error loading movies: ${error.message}`);
+    }
+}
+
+// Render movies grid
+function renderMovies(movies) {
+    const grid = document.getElementById('movies-grid');
+    grid.innerHTML = '';
+
+    movies.forEach(m => {
+        const card = document.createElement('div');
+        card.className = 'media-card';
+        card.onclick = () => searchMovie(m);
+
+        const posterHtml = m.poster_url
+            ? `<img src="${m.poster_url}" alt="${m.title}" onerror="this.style.display='none';this.parentElement.innerHTML='No Image'"/>`
+            : 'No Image';
+
+        card.innerHTML = `
+            <div class="media-poster">${posterHtml}</div>
+            <div class="media-info">
+                <div class="media-title" title="${m.title}">${m.title}</div>
+                <div class="media-year">${m.year || 'Unknown'}</div>
+            </div>
+        `;
+
+        grid.appendChild(card);
+    });
+}
+
+// Search for movie
+async function searchMovie(movie) {
+    if (!confirm(`Search Webshare for "${movie.title}" (${movie.year})?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/search-movie', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({source: source, limit: 10})
+            body: JSON.stringify({
+                movie_id: movie.id,
+                title: movie.title,
+                year: movie.year,
+                path: movie.path
+            })
         });
 
         const data = await response.json();
 
-        if (data.success) {
-            alert(`Success! Created ${data.pending_count} pending confirmations from ${source}`);
-            location.reload();
+        if (data.success && data.results_count > 0) {
+            // Redirect to confirmation page
+            window.location.href = `/download/${data.pending_id}`;
         } else {
-            alert(`Error: ${data.error || 'Unknown error'}`);
+            alert('No results found on Webshare for this movie.');
         }
     } catch (error) {
-        alert(`Error: ${error.message}`);
-    } finally {
-        button.disabled = false;
-        button.textContent = `Fetch Missing from ${source.charAt(0).toUpperCase() + source.slice(1)}`;
+        alert(`Error searching movie: ${error.message}`);
     }
 }
+
+// Load series on page load
+window.addEventListener('DOMContentLoaded', () => {
+    loadSeries();
+});
 </script>
-
-{% if pending_items %}
-    <p style="color: #888; margin-bottom: 20px;">{{ pending_items|length }} item(s) waiting for confirmation</p>
-
-    {% for item in pending_items %}
-        <div class="pending-item">
-            <div class="item-header">
-                <div class="item-title">
-                    {% if item.source == 'sonarr' %}
-                        {{ item.item_title }} - S{{ "%02d"|format(item.season) }}E{{ "%02d"|format(item.episode) }}
-                    {% else %}
-                        {{ item.item_title }} ({{ item.year }})
-                    {% endif %}
-                </div>
-                <div class="item-meta">
-                    Source: {{ item.source|upper }} |
-                    Query: {{ item.search_query }} |
-                    Found {{ item.results|length }} results |
-                    Created: {{ item.created_at.strftime('%Y-%m-%d %H:%M') }}
-                </div>
-            </div>
-
-            <div class="results-grid">
-                {% for result in item.results %}
-                    <div class="result-card">
-                        <div class="result-title">{{ result.name }}</div>
-
-                        <div class="result-meta">
-                            {% if result.parsed.quality %}
-                                <span class="badge badge-quality">{{ result.parsed.quality }}</span>
-                            {% endif %}
-
-                            {% if result.parsed.has_czech %}
-                                <span class="badge badge-czech">CZ</span>
-                            {% endif %}
-
-                            {% if result.parsed.language %}
-                                <span class="badge badge-lang">{{ result.parsed.language }}</span>
-                            {% endif %}
-
-                            {% if result.parsed.source %}
-                                <span class="badge badge-lang">{{ result.parsed.source }}</span>
-                            {% endif %}
-
-                            {% if result.file_size_gb %}
-                                <span class="badge badge-size">{{ "%.2f"|format(result.file_size_gb) }} GB</span>
-                            {% endif %}
-
-                            <span class="badge badge-score">Score: {{ result.score.total }}</span>
-                        </div>
-
-                        <form method="POST" action="/download" style="display: inline;">
-                            <input type="hidden" name="pending_id" value="{{ item.id }}">
-                            <input type="hidden" name="result_index" value="{{ loop.index0 }}">
-                            <button type="submit" class="btn btn-primary">Download This</button>
-                        </form>
-                    </div>
-                {% endfor %}
-            </div>
-        </div>
-    {% endfor %}
-{% else %}
-    <div class="empty-state">
-        <h3>No pending downloads</h3>
-        <p>Webhooks from Sonarr/Radarr will appear here</p>
-    </div>
-{% endif %}
 {% endblock %}

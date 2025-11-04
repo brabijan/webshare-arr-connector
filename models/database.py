@@ -52,6 +52,7 @@ class DownloadHistory(Base):
     file_size = Column(Integer, nullable=True)  # In bytes
     quality = Column(String(20), nullable=True)  # 720p, 1080p, etc.
     language = Column(String(50), nullable=True)  # CZ, EN, etc.
+    destination_path = Column(String(500), nullable=True)  # Path from Sonarr/Radarr
 
     pyload_package_id = Column(String(100), nullable=True)
     status = Column(String(20), nullable=False, default='pending')  # pending, sent, failed
@@ -79,6 +80,7 @@ class PendingConfirmation(Base):
 
     search_query = Column(String(500), nullable=False)
     results_json = Column(Text, nullable=False)  # JSON array of top results
+    destination_path = Column(String(500), nullable=True)  # Path from Sonarr/Radarr
 
     status = Column(String(20), nullable=False, default='pending')  # pending, confirmed, rejected
     selected_index = Column(Integer, nullable=True)  # Index of selected result

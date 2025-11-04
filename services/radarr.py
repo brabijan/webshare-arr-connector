@@ -53,6 +53,43 @@ class RadarrClient:
             logger.error(f"Error fetching missing movies: {e}")
             return []
 
+    def get_all_monitored_movies(self):
+        """
+        Get all monitored movies without files from Radarr
+        Uses /api/v3/movie endpoint for full movie objects with path field
+
+        Returns:
+            list: List of monitored movies without files
+        """
+        url = f"{self.base_url}/api/v3/movie"
+
+        try:
+            logger.info("Fetching all movies from Radarr")
+            response = requests.get(
+                url,
+                headers=self.headers,
+                timeout=15
+            )
+
+            if response.status_code == 200:
+                all_movies = response.json()
+
+                # Filter for monitored movies without files
+                missing_movies = [
+                    m for m in all_movies
+                    if m.get('monitored') and not m.get('hasFile')
+                ]
+
+                logger.info(f"Found {len(missing_movies)} monitored movies without files")
+                return missing_movies
+            else:
+                logger.error(f"Radarr API error: {response.status_code} - {response.text[:200]}")
+                return []
+
+        except Exception as e:
+            logger.error(f"Error fetching movies: {e}")
+            return []
+
     def parse_webhook(self, webhook_data):
         """
         Parse Radarr webhook payload

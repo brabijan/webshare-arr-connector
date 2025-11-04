@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}{{ series.title }} - Seasons{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 20px;">
+    <a href="/" style="color: #4CAF50; text-decoration: none;">&larr; Back to Series List</a>
+</div>
+
+<div style="display: flex; align-items: flex-start; gap: 30px; margin-bottom: 40px;">
+    {% if series.poster_url %}
+    <img src="{{ series.poster_url }}" alt="{{ series.title }}"
+         style="width: 200px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.3);"
+         onerror="this.style.display='none'"/>
+    {% endif %}
+
+    <div>
+        <h1 style="margin: 0 0 10px 0;">{{ series.title }}</h1>
+        <p style="color: #999; margin: 0 0 20px 0;">{{ series.year }}</p>
+        <p style="color: #ccc;">Select a season to view missing episodes</p>
+    </div>
+</div>
+
+<div id="loading" style="display: block; text-align: center; padding: 40px;">
+    <p>Loading seasons...</p>
+</div>
+
+<div id="seasons-list" style="display: none;"></div>
+
+<div id="no-seasons" style="display: none;" class="empty-state">
+    <h3>No missing episodes</h3>
+    <p>All episodes for this series are downloaded!</p>
+</div>
+
+<style>
+.season-card {
+    background: #1a1a1a;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 15px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.season-card:hover {
+    background: #252525;
+    transform: translateX(5px);
+}
+
+.season-title {
+    font-size: 18px;
+    font-weight: bold;
+    color: #fff;
+}
+
+.season-badge {
+    background: #f44336;
+    color: white;
+    padding: 6px 12px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #888;
+}
+
+.empty-state h3 {
+    margin-bottom: 10px;
+}
+</style>
+
+<script>
+const seriesId = {{ series.id }};
+const seriesTitle = "{{ series.title }}";
+const seriesPath = "{{ series.path }}";
+
+async function loadSeasons() {
+    const loading = document.getElementById('loading');
+    const seasonsList = document.getElementById('seasons-list');
+    const noSeasons = document.getElementById('no-seasons');
+
+    try {
+        const response = await fetch(`/api/series/${seriesId}/seasons`);
+        const data = await response.json();
+
+        loading.style.display = 'none';
+
+        if (data.success && data.seasons.length > 0) {
+            seasonsList.style.display = 'block';
+            renderSeasons(data.seasons);
+        } else {
+            noSeasons.style.display = 'block';
+        }
+    } catch (error) {
+        loading.style.display = 'none';
+        alert(`Error loading seasons: ${error.message}`);
+    }
+}
+
+function renderSeasons(seasons) {
+    const seasonsList = document.getElementById('seasons-list');
+    seasonsList.innerHTML = '';
+
+    seasons.forEach(season => {
+        const card = document.createElement('div');
+        card.className = 'season-card';
+        card.onclick = () => window.location.href = `/series/${seriesId}/season/${season.season_number}`;
+
+        card.innerHTML = `
+            <div class="season-title">Season ${season.season_number}</div>
+            <div class="season-badge">${season.missing_count} missing</div>
+        `;
+
+        seasonsList.appendChild(card);
+    });
+}
+
+// Load seasons on page load
+window.addEventListener('DOMContentLoaded', () => {
+    loadSeasons();
+});
+</script>
+{% endblock %}

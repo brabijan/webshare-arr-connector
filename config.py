@@ -23,7 +23,7 @@ SONARR_URL = os.getenv('SONARR_URL', 'https://sonarr.homelab.carpiftw.cz')
 SONARR_API_KEY = os.getenv('SONARR_API_KEY', '66bff25cbaa142b7b925a92078a065a9')
 
 # Radarr settings
-RADARR_URL = os.getenv('RADARR_URL', 'http://radarr:7878')
+RADARR_URL = os.getenv('RADARR_URL', 'https://radarr.homelab.carpiftw.cz')
 RADARR_API_KEY = os.getenv('RADARR_API_KEY', '')
 
 # Search preferences

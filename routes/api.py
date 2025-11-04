@@ -137,8 +137,15 @@ def confirm_download():
             else:  # radarr
                 package_name = f"{pending.item_title} ({pending.year})"
 
-            # Add to pyLoad
-            success, message, package_id = pyload.add_to_pyload(direct_link, package_name)
+            # Get destination path from pending confirmation
+            destination_path = pending.destination_path
+
+            # Add to pyLoad with destination path
+            success, message, package_id = pyload.add_to_pyload(
+                direct_link,
+                package_name,
+                destination_path=destination_path
+            )
 
             if not success:
                 return jsonify({'error': f'Failed to add to pyLoad: {message}'}), 500
@@ -161,6 +168,7 @@ def confirm_download():
                 file_size=selected_result.get('size'),
                 quality=selected_result.get('parsed', {}).get('quality'),
                 language=selected_result.get('parsed', {}).get('language'),
+                destination_path=destination_path,
                 pyload_package_id=package_id,
                 status='sent'
             )
@@ -307,38 +315,301 @@ def get_stats():
         return jsonify({'error': str(e)}), 500
 
 
-@api_bp.route('/fetch-missing', methods=['POST'])
-def fetch_missing():
-    """
-    Fetch missing items from Sonarr/Radarr and create pending confirmations
-
-    POST body:
-    {
-        "source": "sonarr" or "radarr",
-        "limit": 10  // Optional, default 10
-    }
-    """
+@api_bp.route('/series', methods=['GET'])
+def get_series():
+    """Get all monitored series from Sonarr with missing episode counts"""
     try:
-        data = request.json or {}
-        source = data.get('source', 'sonarr')
-        limit = data.get('limit', 10)
+        from services import sonarr
+        sonarr_client = sonarr.get_client()
 
-        if source not in ['sonarr', 'radarr']:
-            return jsonify({'error': 'Invalid source, must be sonarr or radarr'}), 400
+        all_series = sonarr_client.get_all_series()
 
-        logger.info(f"Fetching missing items from {source} (limit={limit})")
+        # Enrich with missing count
+        series_list = []
+        for s in all_series:
+            stats = s.get('statistics', {})
+            missing_count = stats.get('episodeCount', 0) - stats.get('episodeFileCount', 0)
 
-        # Use search service to fetch and process missing items
-        pending_ids = search.search_missing_items(source=source, limit=limit)
+            # Find poster image
+            poster_url = None
+            for image in s.get('images', []):
+                if image.get('coverType') == 'poster':
+                    poster_url = image.get('remoteUrl') or image.get('url')
+                    break
+
+            series_list.append({
+                'id': s.get('id'),
+                'title': s.get('title'),
+                'year': s.get('year'),
+                'path': s.get('path'),
+                'poster_url': poster_url,
+                'missing_count': missing_count,
+                'monitored': s.get('monitored')
+            })
+
+        # Filter for series with missing episodes
+        series_with_missing = [s for s in series_list if s['missing_count'] > 0]
 
         return jsonify({
             'success': True,
-            'source': source,
-            'pending_count': len(pending_ids),
-            'pending_ids': pending_ids,
-            'message': f'Created {len(pending_ids)} pending confirmations from {source}'
+            'count': len(series_with_missing),
+            'series': series_with_missing
         }), 200
 
     except Exception as e:
-        logger.error(f"Error fetching missing items: {e}", exc_info=True)
+        logger.error(f"Error fetching series: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/series/<int:series_id>/seasons', methods=['GET'])
+def get_series_seasons(series_id):
+    """Get seasons with missing episodes for a specific series"""
+    try:
+        from services import sonarr
+        sonarr_client = sonarr.get_client()
+
+        seasons_dict = sonarr_client.get_series_missing_episodes(series_id)
+
+        # Convert to list format with counts
+        seasons_list = []
+        for season_num, episodes in sorted(seasons_dict.items()):
+            seasons_list.append({
+                'season_number': season_num,
+                'missing_count': len(episodes)
+            })
+
+        return jsonify({
+            'success': True,
+            'series_id': series_id,
+            'seasons': seasons_list
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching seasons: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/series/<int:series_id>/season/<int:season_num>', methods=['GET'])
+def get_season_episodes(series_id, season_num):
+    """Get missing episodes for a specific season"""
+    try:
+        from services import sonarr
+        sonarr_client = sonarr.get_client()
+
+        seasons_dict = sonarr_client.get_series_missing_episodes(series_id)
+        episodes = seasons_dict.get(season_num, [])
+
+        # Format episode list
+        episode_list = []
+        for ep in episodes:
+            episode_list.append({
+                'id': ep.get('id'),
+                'episode_number': ep.get('episodeNumber'),
+                'season_number': ep.get('seasonNumber'),
+                'title': ep.get('title'),
+                'air_date': ep.get('airDate'),
+                'has_file': ep.get('hasFile'),
+                'monitored': ep.get('monitored')
+            })
+
+        return jsonify({
+            'success': True,
+            'series_id': series_id,
+            'season_number': season_num,
+            'episodes': episode_list
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching episodes: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/movies', methods=['GET'])
+def get_movies():
+    """Get all monitored movies without files from Radarr"""
+    try:
+        from services import radarr
+        radarr_client = radarr.get_client()
+
+        missing_movies = radarr_client.get_all_monitored_movies()
+
+        # Format movie list
+        movie_list = []
+        for m in missing_movies:
+            # Find poster image
+            poster_url = None
+            for image in m.get('images', []):
+                if image.get('coverType') == 'poster':
+                    poster_url = image.get('remoteUrl') or image.get('url')
+                    break
+
+            movie_list.append({
+                'id': m.get('id'),
+                'title': m.get('title'),
+                'year': m.get('year'),
+                'path': m.get('path'),
+                'poster_url': poster_url,
+                'monitored': m.get('monitored'),
+                'has_file': m.get('hasFile')
+            })
+
+        return jsonify({
+            'success': True,
+            'count': len(movie_list),
+            'movies': movie_list
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching movies: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/search-episode', methods=['POST'])
+def search_episode():
+    """
+    Search Webshare for a specific episode
+
+    POST body:
+    {
+        "series_id": 123,
+        "series_title": "Breaking Bad",
+        "series_path": "/mnt/sdc1/Serialy/Breaking Bad",
+        "season": 1,
+        "episode": 1
+    }
+    """
+    try:
+        data = request.json
+
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        series_title = data.get('series_title')
+        season = data.get('season')
+        episode = data.get('episode')
+        series_path = data.get('series_path')
+
+        if not all([series_title, season is not None, episode is not None]):
+            return jsonify({'error': 'series_title, season, and episode are required'}), 400
+
+        # Create item_info for search
+        item_info = {
+            'source': 'sonarr',
+            'series_id': data.get('series_id'),
+            'series_title': series_title,
+            'season': season,
+            'episode': episode
+        }
+
+        # Search for this episode
+        results = search.search_for_item(item_info, top_n=10)
+
+        if not results:
+            return jsonify({
+                'success': True,
+                'results_count': 0,
+                'results': [],
+                'message': 'No results found'
+            }), 200
+
+        # Create pending confirmation
+        pending_id = search.create_pending_confirmation(item_info, results)
+
+        # Store destination path in pending confirmation
+        if pending_id and series_path:
+            db = get_db_session()
+            try:
+                pending = db.query(PendingConfirmation).filter(
+                    PendingConfirmation.id == pending_id
+                ).first()
+                if pending:
+                    pending.destination_path = series_path
+                    db.commit()
+            finally:
+                db.close()
+
+        return jsonify({
+            'success': True,
+            'pending_id': pending_id,
+            'results_count': len(results),
+            'results': results,
+            'destination_path': series_path
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error searching episode: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/search-movie', methods=['POST'])
+def search_movie():
+    """
+    Search Webshare for a specific movie
+
+    POST body:
+    {
+        "movie_id": 123,
+        "title": "The Matrix",
+        "year": 1999,
+        "path": "/movies/The Matrix (1999)"
+    }
+    """
+    try:
+        data = request.json
+
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        title = data.get('title')
+        year = data.get('year')
+        movie_path = data.get('path')
+
+        if not title:
+            return jsonify({'error': 'title is required'}), 400
+
+        # Create item_info for search
+        item_info = {
+            'source': 'radarr',
+            'movie_id': data.get('movie_id'),
+            'title': title,
+            'year': year
+        }
+
+        # Search for this movie
+        results = search.search_for_item(item_info, top_n=10)
+
+        if not results:
+            return jsonify({
+                'success': True,
+                'results_count': 0,
+                'results': [],
+                'message': 'No results found'
+            }), 200
+
+        # Create pending confirmation
+        pending_id = search.create_pending_confirmation(item_info, results)
+
+        # Store destination path in pending confirmation
+        if pending_id and movie_path:
+            db = get_db_session()
+            try:
+                pending = db.query(PendingConfirmation).filter(
+                    PendingConfirmation.id == pending_id
+                ).first()
+                if pending:
+                    pending.destination_path = movie_path
+                    db.commit()
+            finally:
+                db.close()
+
+        return jsonify({
+            'success': True,
+            'pending_id': pending_id,
+            'results_count': len(results),
+            'results': results,
+            'destination_path': movie_path
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error searching movie: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500

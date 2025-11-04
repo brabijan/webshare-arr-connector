@@ -6,7 +6,7 @@ import config
 logger = logging.getLogger(__name__)
 
 
-def add_to_pyload(direct_links, package_name='Webshare Download'):
+def add_to_pyload(direct_links, package_name='Webshare Download', destination_path=None):
     """
     Add download(s) to pyLoad API
     (Reused from original app)
@@ -14,6 +14,7 @@ def add_to_pyload(direct_links, package_name='Webshare Download'):
     Args:
         direct_links: Single link (string) or list of links
         package_name: Name of the package in pyLoad
+        destination_path: Optional folder path for downloads (e.g., "/mnt/sdc1/Serialy/Breaking Bad")
 
     Returns:
         tuple: (success, message, package_id)
@@ -32,10 +33,16 @@ def add_to_pyload(direct_links, package_name='Webshare Download'):
         # Package parameters
         params = {
             'name': package_name,
-            'links': direct_links
+            'links': direct_links,
+            'dest': 1  # 1 = Queue (immediate download), 0 = Collector
         }
 
-        logger.info(f"Adding {len(direct_links)} file(s) to pyLoad as package: {package_name}")
+        # Add folder path if specified
+        if destination_path:
+            params['folder'] = destination_path
+            logger.info(f"Adding {len(direct_links)} file(s) to pyLoad as package: {package_name} (destination: {destination_path})")
+        else:
+            logger.info(f"Adding {len(direct_links)} file(s) to pyLoad as package: {package_name}")
 
         # Use HTTP Basic Auth
         response = requests.post(

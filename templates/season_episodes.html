@@ -1,0 +1,352 @@
+{% extends "base.html" %}
+
+{% block title %}{{ series.title }} - Season {{ season_number }}{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 20px;">
+    <a href="/series/{{ series.id }}/seasons" style="color: #4CAF50; text-decoration: none;">&larr; Back to Seasons</a>
+</div>
+
+<div style="display: flex; align-items: flex-start; gap: 30px; margin-bottom: 40px;">
+    {% if series.poster_url %}
+    <img src="{{ series.poster_url }}" alt="{{ series.title }}"
+         style="width: 150px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.3);"
+         onerror="this.style.display='none'"/>
+    {% endif %}
+
+    <div>
+        <h1 style="margin: 0 0 10px 0;">{{ series.title }}</h1>
+        <h2 style="margin: 0 0 10px 0; color: #999;">Season {{ season_number }}</h2>
+        <p style="color: #ccc;">Click "Search Webshare" to find downloads for an episode</p>
+    </div>
+</div>
+
+<div id="loading" style="display: block; text-align: center; padding: 40px;">
+    <p>Loading episodes...</p>
+</div>
+
+<div id="episodes-list" style="display: none;"></div>
+
+<div id="no-episodes" style="display: none;" class="empty-state">
+    <h3>No missing episodes</h3>
+    <p>All episodes for this season are downloaded!</p>
+</div>
+
+<!-- Search Results Modal -->
+<div id="search-modal" class="modal">
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2 id="modal-title">Search Results</h2>
+        <div id="modal-loading" style="text-align: center; padding: 40px;">
+            <p>Searching Webshare...</p>
+        </div>
+        <div id="modal-results"></div>
+    </div>
+</div>
+
+<style>
+.episode-card {
+    background: #1a1a1a;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.2s;
+}
+
+.episode-card:hover {
+    background: #252525;
+}
+
+.episode-info {
+    flex: 1;
+}
+
+.episode-number {
+    font-size: 14px;
+    color: #4CAF50;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.episode-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 5px;
+}
+
+.episode-date {
+    font-size: 12px;
+    color: #999;
+}
+
+.btn {
+    padding: 10px 20px;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+}
+
+.btn:hover {
+    background: #45a049;
+}
+
+.btn:disabled {
+    background: #666;
+    cursor: not-allowed;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #888;
+}
+
+.empty-state h3 {
+    margin-bottom: 10px;
+}
+
+/* Modal */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.7);
+}
+
+.modal-content {
+    background-color: #1a1a1a;
+    margin: 5% auto;
+    padding: 30px;
+    border: 1px solid #333;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 900px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close:hover {
+    color: #fff;
+}
+
+.result-card {
+    background: #252525;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 10px;
+}
+
+.result-title {
+    font-size: 14px;
+    color: #fff;
+    margin-bottom: 10px;
+    word-break: break-word;
+}
+
+.result-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.badge-quality {
+    background: #2196F3;
+    color: white;
+}
+
+.badge-czech {
+    background: #FF5722;
+    color: white;
+}
+
+.badge-lang {
+    background: #9C27B0;
+    color: white;
+}
+
+.badge-size {
+    background: #607D8B;
+    color: white;
+}
+
+.badge-score {
+    background: #4CAF50;
+    color: white;
+}
+</style>
+
+<script>
+const seriesId = {{ series.id }};
+const seriesTitle = "{{ series.title }}";
+const seriesPath = "{{ series.path }}";
+const seasonNumber = {{ season_number }};
+
+let currentEpisode = null;
+
+async function loadEpisodes() {
+    const loading = document.getElementById('loading');
+    const episodesList = document.getElementById('episodes-list');
+    const noEpisodes = document.getElementById('no-episodes');
+
+    try {
+        const response = await fetch(`/api/series/${seriesId}/season/${seasonNumber}`);
+        const data = await response.json();
+
+        loading.style.display = 'none';
+
+        if (data.success && data.episodes.length > 0) {
+            episodesList.style.display = 'block';
+            renderEpisodes(data.episodes);
+        } else {
+            noEpisodes.style.display = 'block';
+        }
+    } catch (error) {
+        loading.style.display = 'none';
+        alert(`Error loading episodes: ${error.message}`);
+    }
+}
+
+function renderEpisodes(episodes) {
+    const episodesList = document.getElementById('episodes-list');
+    episodesList.innerHTML = '';
+
+    episodes.forEach(episode => {
+        const card = document.createElement('div');
+        card.className = 'episode-card';
+
+        card.innerHTML = `
+            <div class="episode-info">
+                <div class="episode-number">S${String(episode.season_number).padStart(2, '0')}E${String(episode.episode_number).padStart(2, '0')}</div>
+                <div class="episode-title">${episode.title || 'Unknown Title'}</div>
+                <div class="episode-date">${episode.air_date || 'Air date unknown'}</div>
+            </div>
+            <button class="btn" onclick="searchEpisode(${episode.season_number}, ${episode.episode_number}, '${(episode.title || '').replace(/'/g, "\\'")}')">
+                Search Webshare
+            </button>
+        `;
+
+        episodesList.appendChild(card);
+    });
+}
+
+async function searchEpisode(season, episode, episodeTitle) {
+    currentEpisode = {season, episode, episodeTitle};
+
+    // Show modal
+    const modal = document.getElementById('search-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalLoading = document.getElementById('modal-loading');
+    const modalResults = document.getElementById('modal-results');
+
+    modalTitle.textContent = `${seriesTitle} - S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+    modalLoading.style.display = 'block';
+    modalResults.innerHTML = '';
+    modal.style.display = 'block';
+
+    try {
+        const response = await fetch('/api/search-episode', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                series_id: seriesId,
+                series_title: seriesTitle,
+                series_path: seriesPath,
+                season: season,
+                episode: episode
+            })
+        });
+
+        const data = await response.json();
+        modalLoading.style.display = 'none';
+
+        if (data.success && data.results_count > 0) {
+            renderResults(data.results, data.pending_id);
+        } else {
+            modalResults.innerHTML = '<p style="text-align: center; color: #999;">No results found on Webshare.</p>';
+        }
+    } catch (error) {
+        modalLoading.style.display = 'none';
+        modalResults.innerHTML = `<p style="text-align: center; color: #f44336;">Error: ${error.message}</p>`;
+    }
+}
+
+function renderResults(results, pendingId) {
+    const modalResults = document.getElementById('modal-results');
+    modalResults.innerHTML = '';
+
+    results.forEach((result, index) => {
+        const card = document.createElement('div');
+        card.className = 'result-card';
+
+        const parsed = result.parsed || {};
+        const score = result.score || {};
+
+        card.innerHTML = `
+            <div class="result-title">${result.name}</div>
+            <div class="result-meta">
+                ${parsed.quality ? `<span class="badge badge-quality">${parsed.quality}</span>` : ''}
+                ${parsed.has_czech ? `<span class="badge badge-czech">CZ</span>` : ''}
+                ${parsed.language ? `<span class="badge badge-lang">${parsed.language}</span>` : ''}
+                ${parsed.source ? `<span class="badge badge-lang">${parsed.source}</span>` : ''}
+                ${result.file_size_gb ? `<span class="badge badge-size">${result.file_size_gb.toFixed(2)} GB</span>` : ''}
+                ${score.total !== undefined ? `<span class="badge badge-score">Score: ${score.total}</span>` : ''}
+            </div>
+            <form method="POST" action="/download" style="display: inline;">
+                <input type="hidden" name="pending_id" value="${pendingId}">
+                <input type="hidden" name="result_index" value="${index}">
+                <button type="submit" class="btn">Download This</button>
+            </form>
+        `;
+
+        modalResults.appendChild(card);
+    });
+}
+
+// Modal close button
+document.querySelector('.close').onclick = function() {
+    document.getElementById('search-modal').style.display = 'none';
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const modal = document.getElementById('search-modal');
+    if (event.target == modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// Load episodes on page load
+window.addEventListener('DOMContentLoaded', () => {
+    loadEpisodes();
+});
+</script>
+{% endblock %}

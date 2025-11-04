@@ -54,6 +54,90 @@ class SonarrClient:
             logger.error(f"Error fetching missing episodes: {e}")
             return []
 
+    def get_all_series(self):
+        """
+        Get all monitored series from Sonarr
+
+        Returns:
+            list: List of series with statistics
+        """
+        url = f"{self.base_url}/api/v3/series"
+
+        try:
+            logger.info("Fetching all series from Sonarr")
+            response = requests.get(
+                url,
+                headers=self.headers,
+                timeout=15
+            )
+
+            if response.status_code == 200:
+                all_series = response.json()
+                # Filter for monitored series
+                monitored_series = [s for s in all_series if s.get('monitored')]
+                logger.info(f"Found {len(monitored_series)} monitored series")
+                return monitored_series
+            else:
+                logger.error(f"Sonarr API error: {response.status_code} - {response.text[:200]}")
+                return []
+
+        except Exception as e:
+            logger.error(f"Error fetching series: {e}")
+            return []
+
+    def get_series_missing_episodes(self, series_id):
+        """
+        Get missing episodes for a specific series, grouped by season
+
+        Args:
+            series_id (int): Sonarr series ID
+
+        Returns:
+            dict: Episodes grouped by season number
+                  {1: [{episode1}, {episode2}], 2: [{episode3}]}
+        """
+        url = f"{self.base_url}/api/v3/episode"
+        params = {
+            'seriesId': series_id
+        }
+
+        try:
+            logger.info(f"Fetching episodes for series ID {series_id}")
+            response = requests.get(
+                url,
+                headers=self.headers,
+                params=params,
+                timeout=15
+            )
+
+            if response.status_code == 200:
+                all_episodes = response.json()
+
+                # Filter for monitored episodes without files
+                missing_episodes = [
+                    ep for ep in all_episodes
+                    if ep.get('monitored') and not ep.get('hasFile')
+                ]
+
+                # Group by season
+                seasons = {}
+                for episode in missing_episodes:
+                    season_num = episode.get('seasonNumber')
+                    if season_num is not None:
+                        if season_num not in seasons:
+                            seasons[season_num] = []
+                        seasons[season_num].append(episode)
+
+                logger.info(f"Found {len(missing_episodes)} missing episodes across {len(seasons)} seasons")
+                return seasons
+            else:
+                logger.error(f"Sonarr API error: {response.status_code} - {response.text[:200]}")
+                return {}
+
+        except Exception as e:
+            logger.error(f"Error fetching episodes: {e}")
+            return {}
+
     def parse_webhook(self, webhook_data):
         """
         Parse Sonarr webhook payload
