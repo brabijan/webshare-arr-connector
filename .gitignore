@@ -31,6 +31,9 @@ data/*.db
 *.sqlite
 *.sqlite3
 
+# Backups
+backups/
+
 # Logs
 logs/*.log
 

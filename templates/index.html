@@ -136,12 +136,23 @@
     position: absolute;
     top: 10px;
     right: 10px;
-    background: #f44336;
     color: white;
     padding: 4px 8px;
     border-radius: 12px;
     font-size: 12px;
     font-weight: bold;
+}
+
+.media-badge-missing {
+    background: #f44336;  /* Red for missing only */
+}
+
+.media-badge-downloading {
+    background: #4CAF50;  /* Green for downloading only */
+}
+
+.media-badge-mixed {
+    background: #FF9800;  /* Orange for mixed (missing + downloading) */
 }
 
 .empty-state {
@@ -225,13 +236,34 @@ function renderSeries(series) {
             ? `<img src="${s.poster_url}" alt="${s.title}" onerror="this.style.display='none';this.parentElement.innerHTML='No Image'"/>`
             : 'No Image';
 
+        // Determine badge text and class
+        let badgeText = '';
+        let badgeClass = '';
+
+        const missing = s.missing_count || 0;
+        const downloading = s.downloading_count || 0;
+
+        if (downloading > 0 && missing === 0) {
+            // Only downloading (green)
+            badgeText = `${downloading} stahuje se`;
+            badgeClass = 'media-badge-downloading';
+        } else if (downloading > 0 && missing > 0) {
+            // Both (orange)
+            badgeText = `${missing} missing • ${downloading} stahuje se`;
+            badgeClass = 'media-badge-mixed';
+        } else {
+            // Only missing (red)
+            badgeText = `${missing} missing`;
+            badgeClass = 'media-badge-missing';
+        }
+
         card.innerHTML = `
             <div class="media-poster">${posterHtml}</div>
             <div class="media-info">
                 <div class="media-title" title="${s.title}">${s.title}</div>
                 <div class="media-year">${s.year || 'Unknown'}</div>
             </div>
-            <div class="media-badge">${s.missing_count} missing</div>
+            <div class="media-badge ${badgeClass}">${badgeText}</div>
         `;
 
         grid.appendChild(card);
@@ -280,12 +312,18 @@ function renderMovies(movies) {
             ? `<img src="${m.poster_url}" alt="${m.title}" onerror="this.style.display='none';this.parentElement.innerHTML='No Image'"/>`
             : 'No Image';
 
+        // Add downloading badge if applicable
+        const badgeHtml = m.is_downloading
+            ? '<div class="media-badge media-badge-downloading">Stahuje se</div>'
+            : '';
+
         card.innerHTML = `
             <div class="media-poster">${posterHtml}</div>
             <div class="media-info">
                 <div class="media-title" title="${m.title}">${m.title}</div>
                 <div class="media-year">${m.year || 'Unknown'}</div>
             </div>
+            ${badgeHtml}
         `;
 
         grid.appendChild(card);

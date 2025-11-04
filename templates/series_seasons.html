@@ -57,12 +57,23 @@
 }
 
 .season-badge {
-    background: #f44336;
     color: white;
     padding: 6px 12px;
     border-radius: 12px;
     font-size: 14px;
     font-weight: bold;
+}
+
+.season-badge-missing {
+    background: #f44336;  /* Red for missing only */
+}
+
+.season-badge-downloading {
+    background: #4CAF50;  /* Green for downloading only */
+}
+
+.season-badge-mixed {
+    background: #FF9800;  /* Orange for mixed (missing + downloading) */
 }
 
 .empty-state {
@@ -113,9 +124,30 @@ function renderSeasons(seasons) {
         card.className = 'season-card';
         card.onclick = () => window.location.href = `/series/${seriesId}/season/${season.season_number}`;
 
+        // Determine badge text and class
+        let badgeText = '';
+        let badgeClass = '';
+
+        const missing = season.missing_count || 0;
+        const downloading = season.downloading_count || 0;
+
+        if (downloading > 0 && missing === 0) {
+            // Only downloading (green)
+            badgeText = `${downloading} stahuje se`;
+            badgeClass = 'season-badge-downloading';
+        } else if (downloading > 0 && missing > 0) {
+            // Both (orange)
+            badgeText = `${missing} missing • ${downloading} stahuje se`;
+            badgeClass = 'season-badge-mixed';
+        } else {
+            // Only missing (red)
+            badgeText = `${missing} missing`;
+            badgeClass = 'season-badge-missing';
+        }
+
         card.innerHTML = `
             <div class="season-title">Season ${season.season_number}</div>
-            <div class="season-badge">${season.missing_count} missing</div>
+            <div class="season-badge ${badgeClass}">${badgeText}</div>
         `;
 
         seasonsList.appendChild(card);

@@ -329,15 +329,35 @@ def get_series():
     """Get all monitored series from Sonarr with missing episode counts"""
     try:
         from services import sonarr
+        from sqlalchemy import func
         sonarr_client = sonarr.get_client()
 
         all_series = sonarr_client.get_all_series()
 
-        # Enrich with missing count
+        # Get downloading counts from database (GROUP BY series_id)
+        db = get_db_session()
+        try:
+            downloading_counts = db.query(
+                DownloadHistory.source_id,
+                func.count(DownloadHistory.id).label('count')
+            ).filter(
+                DownloadHistory.source == 'sonarr',
+                DownloadHistory.status == 'sent'
+            ).group_by(DownloadHistory.source_id).all()
+
+            # Convert to dict for easy lookup
+            downloading_dict = {series_id: count for series_id, count in downloading_counts}
+
+        finally:
+            db.close()
+
+        # Enrich with missing count and downloading count
         series_list = []
         for s in all_series:
+            series_id = s.get('id')
             stats = s.get('statistics', {})
             missing_count = stats.get('episodeCount', 0) - stats.get('episodeFileCount', 0)
+            downloading_count = downloading_dict.get(series_id, 0)
 
             # Find poster image
             poster_url = None
@@ -347,22 +367,26 @@ def get_series():
                     break
 
             series_list.append({
-                'id': s.get('id'),
+                'id': series_id,
                 'title': s.get('title'),
                 'year': s.get('year'),
                 'path': s.get('path'),
                 'poster_url': poster_url,
                 'missing_count': missing_count,
+                'downloading_count': downloading_count,
                 'monitored': s.get('monitored')
             })
 
-        # Filter for series with missing episodes
-        series_with_missing = [s for s in series_list if s['missing_count'] > 0]
+        # Filter for series with missing OR downloading episodes
+        series_with_activity = [
+            s for s in series_list
+            if s['missing_count'] > 0 or s['downloading_count'] > 0
+        ]
 
         return jsonify({
             'success': True,
-            'count': len(series_with_missing),
-            'series': series_with_missing
+            'count': len(series_with_activity),
+            'series': series_with_activity
         }), 200
 
     except Exception as e:
@@ -375,16 +399,36 @@ def get_series_seasons(series_id):
     """Get seasons with missing episodes for a specific series"""
     try:
         from services import sonarr
+        from sqlalchemy import func
         sonarr_client = sonarr.get_client()
 
         seasons_dict = sonarr_client.get_series_missing_episodes(series_id)
+
+        # Get downloading counts per season from database
+        db = get_db_session()
+        try:
+            downloading_counts = db.query(
+                DownloadHistory.season,
+                func.count(DownloadHistory.id).label('count')
+            ).filter(
+                DownloadHistory.source == 'sonarr',
+                DownloadHistory.source_id == series_id,
+                DownloadHistory.status == 'sent'
+            ).group_by(DownloadHistory.season).all()
+
+            # Convert to dict for easy lookup
+            downloading_dict = {season: count for season, count in downloading_counts}
+
+        finally:
+            db.close()
 
         # Convert to list format with counts
         seasons_list = []
         for season_num, episodes in sorted(seasons_dict.items()):
             seasons_list.append({
                 'season_number': season_num,
-                'missing_count': len(episodes)
+                'missing_count': len(episodes),
+                'downloading_count': downloading_dict.get(season_num, 0)
             })
 
         return jsonify({
@@ -442,9 +486,26 @@ def get_movies():
 
         missing_movies = radarr_client.get_all_monitored_movies()
 
+        # Get downloading movie IDs from database
+        db = get_db_session()
+        try:
+            downloading_ids = db.query(DownloadHistory.source_id).filter(
+                DownloadHistory.source == 'radarr',
+                DownloadHistory.status == 'sent'
+            ).distinct().all()
+
+            # Convert to set for fast lookup
+            downloading_set = {movie_id for (movie_id,) in downloading_ids}
+
+        finally:
+            db.close()
+
         # Format movie list
         movie_list = []
         for m in missing_movies:
+            movie_id = m.get('id')
+            is_downloading = movie_id in downloading_set
+
             # Find poster image
             poster_url = None
             for image in m.get('images', []):
@@ -453,13 +514,14 @@ def get_movies():
                     break
 
             movie_list.append({
-                'id': m.get('id'),
+                'id': movie_id,
                 'title': m.get('title'),
                 'year': m.get('year'),
                 'path': m.get('path'),
                 'poster_url': poster_url,
                 'monitored': m.get('monitored'),
-                'has_file': m.get('hasFile')
+                'has_file': m.get('hasFile'),
+                'is_downloading': is_downloading
             })
 
         return jsonify({

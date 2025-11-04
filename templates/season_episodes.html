@@ -44,6 +44,9 @@
     </div>
 </div>
 
+<!-- Toast Container -->
+<div id="toast-container" class="toast-container"></div>
+
 <style>
 .episode-card {
     background: #1a1a1a;
@@ -220,6 +223,52 @@
     top: 20px;
     right: 20px;
 }
+
+/* Toast Notification */
+.toast-container {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    z-index: 2000;
+}
+
+.toast {
+    background: #4CAF50;
+    color: white;
+    padding: 16px 24px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    margin-bottom: 10px;
+    min-width: 300px;
+    animation: slideIn 0.3s ease-out, fadeOut 0.3s ease-in 2.7s;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.toast.error {
+    background: #f44336;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0;
+    }
+}
 </style>
 
 <script>
@@ -231,6 +280,21 @@ const seasonNumber = {{ season_number }};
 let currentEpisode = null;
 let currentPendingId = null;
 let downloadedEpisodes = new Set(); // Set of "S01E01" strings
+
+// Toast notification function
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type === 'error' ? 'error' : ''}`;
+    toast.textContent = message;
+
+    container.appendChild(toast);
+
+    // Remove toast after 3 seconds
+    setTimeout(() => {
+        toast.remove();
+    }, 3000);
+}
 
 async function loadDownloadStatus() {
     try {
@@ -271,7 +335,7 @@ async function loadEpisodes() {
         }
     } catch (error) {
         loading.style.display = 'none';
-        alert(`Error loading episodes: ${error.message}`);
+        showToast(`Error loading episodes: ${error.message}`, 'error');
     }
 }
 
@@ -413,7 +477,7 @@ async function downloadFile(pendingId, resultIndex) {
             downloadedEpisodes.add(episodeId);
 
             // Show success message
-            alert(`✓ Odesláno do pyLoad (Package ID: ${data.package_id})`);
+            showToast(`✓ Odesláno do pyLoad (Package ID: ${data.package_id})`);
 
             // Reload episodes to update UI
             await loadEpisodes();
@@ -433,7 +497,7 @@ async function downloadFile(pendingId, resultIndex) {
                 // If 'stay', remain on current page (already reloaded episodes)
             }
         } else {
-            alert(`Chyba: ${data.error || 'Nepodařilo se odeslat'}`);
+            showToast(`Chyba: ${data.error || 'Nepodařilo se odeslat'}`, 'error');
             // Re-enable buttons
             document.querySelectorAll('.modal .btn').forEach(btn => {
                 btn.disabled = false;
@@ -441,7 +505,7 @@ async function downloadFile(pendingId, resultIndex) {
             });
         }
     } catch (error) {
-        alert(`Chyba: ${error.message}`);
+        showToast(`Chyba: ${error.message}`, 'error');
         // Re-enable buttons
         document.querySelectorAll('.modal .btn').forEach(btn => {
             btn.disabled = false;
