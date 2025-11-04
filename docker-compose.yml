@@ -5,8 +5,6 @@ services:
     build: .
     container_name: webshare-downloader
     restart: unless-stopped
-    ports:
-      - "5050:5050"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -52,6 +50,5 @@ services:
       - "traefik.http.services.webshare.loadbalancer.server.port=5050"
 
 networks:
-  default:
-    name: homelab
+  proxy:
     external: true
