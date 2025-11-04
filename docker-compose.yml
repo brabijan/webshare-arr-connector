@@ -49,6 +49,9 @@ services:
       - "traefik.http.routers.webshare.tls.certresolver=cloudflare"
       - "traefik.http.services.webshare.loadbalancer.server.port=5050"
 
+    networks:
+      - proxy
+
 networks:
   proxy:
     external: true
