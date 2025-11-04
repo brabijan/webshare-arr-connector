@@ -54,10 +54,20 @@
     justify-content: space-between;
     align-items: center;
     transition: all 0.2s;
+    position: relative;
 }
 
 .episode-card:hover {
     background: #252525;
+}
+
+.episode-card.downloaded {
+    background: #1a3a1a;
+    border-left: 4px solid #4CAF50;
+}
+
+.episode-card.downloaded:hover {
+    background: #1f4a1f;
 }
 
 .episode-info {
@@ -202,6 +212,14 @@
     background: #4CAF50;
     color: white;
 }
+
+.badge-downloaded {
+    background: #4CAF50;
+    color: white;
+    position: absolute;
+    top: 20px;
+    right: 20px;
+}
 </style>
 
 <script>
@@ -211,6 +229,24 @@ const seriesPath = "{{ series.path }}";
 const seasonNumber = {{ season_number }};
 
 let currentEpisode = null;
+let currentPendingId = null;
+let downloadedEpisodes = new Set(); // Set of "S01E01" strings
+
+async function loadDownloadStatus() {
+    try {
+        const response = await fetch(`/api/download-status?source=sonarr&series_id=${seriesId}&season=${seasonNumber}`);
+        const data = await response.json();
+
+        if (data.success) {
+            downloadedEpisodes.clear();
+            data.downloaded.forEach(item => {
+                downloadedEpisodes.add(item.identifier); // e.g., "S01E01"
+            });
+        }
+    } catch (error) {
+        console.error('Error loading download status:', error);
+    }
+}
 
 async function loadEpisodes() {
     const loading = document.getElementById('loading');
@@ -218,6 +254,10 @@ async function loadEpisodes() {
     const noEpisodes = document.getElementById('no-episodes');
 
     try {
+        // First load download status
+        await loadDownloadStatus();
+
+        // Then load episodes
         const response = await fetch(`/api/series/${seriesId}/season/${seasonNumber}`);
         const data = await response.json();
 
@@ -239,19 +279,36 @@ function renderEpisodes(episodes) {
     const episodesList = document.getElementById('episodes-list');
     episodesList.innerHTML = '';
 
-    episodes.forEach(episode => {
+    // Sort episodes: downloaded ones go to the end
+    const sortedEpisodes = [...episodes].sort((a, b) => {
+        const aId = `S${String(a.season_number).padStart(2, '0')}E${String(a.episode_number).padStart(2, '0')}`;
+        const bId = `S${String(b.season_number).padStart(2, '0')}E${String(b.episode_number).padStart(2, '0')}`;
+        const aDownloaded = downloadedEpisodes.has(aId);
+        const bDownloaded = downloadedEpisodes.has(bId);
+
+        if (aDownloaded && !bDownloaded) return 1;
+        if (!aDownloaded && bDownloaded) return -1;
+        return a.episode_number - b.episode_number;
+    });
+
+    sortedEpisodes.forEach(episode => {
+        const episodeId = `S${String(episode.season_number).padStart(2, '0')}E${String(episode.episode_number).padStart(2, '0')}`;
+        const isDownloaded = downloadedEpisodes.has(episodeId);
+
         const card = document.createElement('div');
-        card.className = 'episode-card';
+        card.className = 'episode-card' + (isDownloaded ? ' downloaded' : '');
+        card.dataset.episodeId = episodeId;
 
         card.innerHTML = `
             <div class="episode-info">
-                <div class="episode-number">S${String(episode.season_number).padStart(2, '0')}E${String(episode.episode_number).padStart(2, '0')}</div>
+                <div class="episode-number">${episodeId}</div>
                 <div class="episode-title">${episode.title || 'Unknown Title'}</div>
                 <div class="episode-date">${episode.air_date || 'Air date unknown'}</div>
             </div>
-            <button class="btn" onclick="searchEpisode(${episode.season_number}, ${episode.episode_number}, '${(episode.title || '').replace(/'/g, "\\'")}')">
-                Search Webshare
-            </button>
+            ${isDownloaded
+                ? '<span class="badge badge-downloaded">Odesláno</span>'
+                : `<button class="btn" onclick="searchEpisode(${episode.season_number}, ${episode.episode_number}, '${(episode.title || '').replace(/'/g, "\\'")}')">Search Webshare</button>`
+            }
         `;
 
         episodesList.appendChild(card);
@@ -289,6 +346,7 @@ async function searchEpisode(season, episode, episodeTitle) {
         modalLoading.style.display = 'none';
 
         if (data.success && data.results_count > 0) {
+            currentPendingId = data.pending_id;
             renderResults(data.results, data.pending_id);
         } else {
             modalResults.innerHTML = '<p style="text-align: center; color: #999;">No results found on Webshare.</p>';
@@ -320,15 +378,76 @@ function renderResults(results, pendingId) {
                 ${result.file_size_gb ? `<span class="badge badge-size">${result.file_size_gb.toFixed(2)} GB</span>` : ''}
                 ${score.total !== undefined ? `<span class="badge badge-score">Score: ${score.total}</span>` : ''}
             </div>
-            <form method="POST" action="/download" style="display: inline;">
-                <input type="hidden" name="pending_id" value="${pendingId}">
-                <input type="hidden" name="result_index" value="${index}">
-                <button type="submit" class="btn">Download This</button>
-            </form>
+            <button class="btn" onclick="downloadFile(${pendingId}, ${index})">Download This</button>
         `;
 
         modalResults.appendChild(card);
     });
+}
+
+async function downloadFile(pendingId, resultIndex) {
+    try {
+        // Disable all buttons
+        document.querySelectorAll('.modal .btn').forEach(btn => {
+            btn.disabled = true;
+            btn.textContent = 'Odesílám...';
+        });
+
+        const response = await fetch('/api/confirm', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                pending_id: pendingId,
+                result_index: resultIndex
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            // Close modal
+            document.getElementById('search-modal').style.display = 'none';
+
+            // Mark episode as downloaded
+            const episodeId = `S${String(currentEpisode.season).padStart(2, '0')}E${String(currentEpisode.episode).padStart(2, '0')}`;
+            downloadedEpisodes.add(episodeId);
+
+            // Show success message
+            alert(`✓ Odesláno do pyLoad (Package ID: ${data.package_id})`);
+
+            // Reload episodes to update UI
+            await loadEpisodes();
+
+            // Handle navigation based on response
+            if (data.navigation) {
+                const nav = data.navigation;
+                if (nav.next_action === 'go_to_seasons') {
+                    setTimeout(() => {
+                        window.location.href = `/series/${seriesId}/seasons`;
+                    }, 1500);
+                } else if (nav.next_action === 'go_to_series_list') {
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1500);
+                }
+                // If 'stay', remain on current page (already reloaded episodes)
+            }
+        } else {
+            alert(`Chyba: ${data.error || 'Nepodařilo se odeslat'}`);
+            // Re-enable buttons
+            document.querySelectorAll('.modal .btn').forEach(btn => {
+                btn.disabled = false;
+                btn.textContent = 'Download This';
+            });
+        }
+    } catch (error) {
+        alert(`Chyba: ${error.message}`);
+        // Re-enable buttons
+        document.querySelectorAll('.modal .btn').forEach(btn => {
+            btn.disabled = false;
+            btn.textContent = 'Download This';
+        });
+    }
 }
 
 // Modal close button

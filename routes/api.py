@@ -178,13 +178,22 @@ def confirm_download():
 
             logger.info(f"Confirmed download for pending ID {pending_id}, pyLoad package: {package_id}")
 
+            # Get navigation info for next step
+            from services import navigation
+            nav_info = navigation.get_navigation_info(
+                source=pending.source,
+                series_id=pending.source_id,
+                season_num=pending.season
+            )
+
             return jsonify({
                 'success': True,
                 'pending_id': pending_id,
                 'package_id': package_id,
                 'package_name': package_name,
                 'filename': selected_result['name'],
-                'message': message
+                'message': message,
+                'navigation': nav_info
             }), 200
 
         finally:
@@ -612,4 +621,70 @@ def search_movie():
 
     except Exception as e:
         logger.error(f"Error searching movie: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/download-status', methods=['GET'])
+def get_download_status():
+    """
+    Get download status for episodes in a season
+
+    Query parameters:
+    - series_id: Sonarr series ID (required for TV shows)
+    - season: Season number (optional, if not provided returns all for series)
+    - source: 'sonarr' or 'radarr' (optional, defaults to 'sonarr')
+
+    Returns list of episode IDs or movie IDs that have been sent to pyLoad
+    """
+    try:
+        source = request.args.get('source', 'sonarr')
+        series_id = request.args.get('series_id', type=int)
+        season = request.args.get('season', type=int)
+
+        db = get_db_session()
+        try:
+            # Query download history
+            query = db.query(DownloadHistory).filter(
+                DownloadHistory.source == source,
+                DownloadHistory.status == 'sent'
+            )
+
+            if series_id:
+                query = query.filter(DownloadHistory.source_id == series_id)
+
+            if season is not None:
+                query = query.filter(DownloadHistory.season == season)
+
+            history_items = query.all()
+
+            # Build response with episode/movie identifiers
+            downloaded_items = []
+            for item in history_items:
+                if source == 'sonarr':
+                    downloaded_items.append({
+                        'season': item.season,
+                        'episode': item.episode,
+                        'identifier': f"S{item.season:02d}E{item.episode:02d}",
+                        'filename': item.filename,
+                        'pyload_package_id': item.pyload_package_id
+                    })
+                else:  # radarr
+                    downloaded_items.append({
+                        'title': item.item_title,
+                        'year': item.year,
+                        'filename': item.filename,
+                        'pyload_package_id': item.pyload_package_id
+                    })
+
+            return jsonify({
+                'success': True,
+                'count': len(downloaded_items),
+                'downloaded': downloaded_items
+            }), 200
+
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"Error getting download status: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
