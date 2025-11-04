@@ -45,10 +45,11 @@ services:
 
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.webshare-downloader.rule=Host(`webshare-downloader.homelab.carpiftw.cz`)"
-      - "traefik.http.routers.webshare-downloader.entrypoints=websecure"
-      - "traefik.http.routers.webshare-downloader.tls.certresolver=letsencrypt"
-      - "traefik.http.services.webshare-downloader.loadbalancer.server.port=5050"
+      - "traefik.http.routers.webshare.rule=Host(`webshare.homelab.carpiftw.cz`)"
+      - "traefik.http.routers.webshare.entrypoints=websecure"
+      - "traefik.http.routers.webshare.tls=true"
+      - "traefik.http.routers.webshare.tls.certresolver=cloudflare"
+      - "traefik.http.services.webshare.loadbalancer.server.port=5050"
 
 networks:
   default:
