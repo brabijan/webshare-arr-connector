@@ -43,7 +43,7 @@ services:
 
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.webshare.rule=Host(`webshare.homelab.carpiftw.cz`)"
+      - "traefik.http.routers.webshare.rule=Host(`webshare-downloader.homelab.carpiftw.cz`)"
       - "traefik.http.routers.webshare.entrypoints=websecure"
       - "traefik.http.routers.webshare.tls=true"
       - "traefik.http.routers.webshare.tls.certresolver=cloudflare"
