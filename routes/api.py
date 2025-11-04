@@ -343,19 +343,20 @@ def get_series():
 
         all_series = sonarr_client.get_all_series()
 
-        # Get downloading counts from database (GROUP BY series_id)
+        # Get all downloading records from database
         db = get_db_session()
         try:
-            downloading_counts = db.query(
-                DownloadHistory.source_id,
-                func.count(DownloadHistory.id).label('count')
-            ).filter(
+            downloading_records = db.query(DownloadHistory).filter(
                 DownloadHistory.source == 'sonarr',
                 DownloadHistory.status == 'sent'
-            ).group_by(DownloadHistory.source_id).all()
+            ).all()
 
-            # Convert to dict for easy lookup
-            downloading_dict = {series_id: count for series_id, count in downloading_counts}
+            # Group by series_id for easy lookup
+            downloading_by_series = {}
+            for record in downloading_records:
+                if record.source_id not in downloading_by_series:
+                    downloading_by_series[record.source_id] = []
+                downloading_by_series[record.source_id].append(record)
 
         finally:
             db.close()
@@ -366,7 +367,21 @@ def get_series():
             series_id = s.get('id')
             stats = s.get('statistics', {})
             missing_count = stats.get('episodeCount', 0) - stats.get('episodeFileCount', 0)
-            downloading_count = downloading_dict.get(series_id, 0)
+
+            # Get missing episodes for this series to filter downloading
+            downloading_count = 0
+            if series_id in downloading_by_series:
+                seasons_dict = sonarr_client.get_series_missing_episodes(series_id)
+                # Create set of (season, episode) tuples for missing episodes
+                missing_episodes = set()
+                for season_num, episodes in seasons_dict.items():
+                    for ep in episodes:
+                        missing_episodes.add((season_num, ep.get('episodeNumber')))
+
+                # Count only downloading records that match missing episodes
+                for record in downloading_by_series[series_id]:
+                    if (record.season, record.episode) in missing_episodes:
+                        downloading_count += 1
 
             # Find poster image
             poster_url = None
@@ -413,20 +428,14 @@ def get_series_seasons(series_id):
 
         seasons_dict = sonarr_client.get_series_missing_episodes(series_id)
 
-        # Get downloading counts per season from database
+        # Get downloading records for this series from database
         db = get_db_session()
         try:
-            downloading_counts = db.query(
-                DownloadHistory.season,
-                func.count(DownloadHistory.id).label('count')
-            ).filter(
+            downloading_records = db.query(DownloadHistory).filter(
                 DownloadHistory.source == 'sonarr',
                 DownloadHistory.source_id == series_id,
                 DownloadHistory.status == 'sent'
-            ).group_by(DownloadHistory.season).all()
-
-            # Convert to dict for easy lookup
-            downloading_dict = {season: count for season, count in downloading_counts}
+            ).all()
 
         finally:
             db.close()
@@ -434,10 +443,19 @@ def get_series_seasons(series_id):
         # Convert to list format with counts
         seasons_list = []
         for season_num, episodes in sorted(seasons_dict.items()):
+            # Create set of episode numbers that are missing in this season
+            missing_episode_nums = {ep.get('episodeNumber') for ep in episodes}
+
+            # Count only downloading records that match missing episodes in this season
+            downloading_count = sum(
+                1 for record in downloading_records
+                if record.season == season_num and record.episode in missing_episode_nums
+            )
+
             seasons_list.append({
                 'season_number': season_num,
                 'missing_count': len(episodes),
-                'downloading_count': downloading_dict.get(season_num, 0)
+                'downloading_count': downloading_count
             })
 
         return jsonify({
