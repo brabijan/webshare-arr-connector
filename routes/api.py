@@ -10,6 +10,15 @@ logger = logging.getLogger(__name__)
 api_bp = Blueprint('api', __name__, url_prefix='/api')
 
 
+@api_bp.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for deployment monitoring"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.utcnow().isoformat()
+    }), 200
+
+
 @api_bp.route('/pending', methods=['GET'])
 def get_pending():
     """Get list of pending confirmations"""
