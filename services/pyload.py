@@ -14,7 +14,7 @@ def add_to_pyload(direct_links, package_name='Webshare Download', destination_pa
     Args:
         direct_links: Single link (string) or list of links
         package_name: Name of the package in pyLoad
-        destination_path: Optional folder path for downloads (e.g., "/mnt/sdc1/Serialy/Breaking Bad")
+        destination_path: DEPRECATED - Kept for compatibility but not used (pyLoad API doesn't support it)
 
     Returns:
         tuple: (success, message, package_id)
@@ -37,12 +37,9 @@ def add_to_pyload(direct_links, package_name='Webshare Download', destination_pa
             'dest': 1  # 1 = Queue (immediate download), 0 = Collector
         }
 
-        # Add folder path if specified
-        if destination_path:
-            params['folder'] = destination_path
-            logger.info(f"Adding {len(direct_links)} file(s) to pyLoad as package: {package_name} (destination: {destination_path})")
-        else:
-            logger.info(f"Adding {len(direct_links)} file(s) to pyLoad as package: {package_name}")
+        # Note: destination_path parameter is kept for compatibility but not used
+        # pyLoad API doesn't support 'folder' parameter
+        logger.info(f"Adding {len(direct_links)} file(s) to pyLoad as package: {package_name}")
 
         # Use HTTP Basic Auth
         response = requests.post(
