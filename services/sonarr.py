@@ -211,6 +211,53 @@ class SonarrClient:
         logger.info(f"Generated {len(queries)} search queries for {title} S{season:02d}E{episode:02d}")
         return queries
 
+    def trigger_series_rescan(self, series_id):
+        """
+        Trigger rescan for specific series (PLACEHOLDER for future use)
+
+        Args:
+            series_id (int): Sonarr series ID
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            url = f"{self.base_url}/api/v3/command"
+            payload = {
+                'name': 'RescanSeries',
+                'seriesId': series_id
+            }
+
+            logger.info(f"Triggering rescan for series {series_id}")
+
+            response = requests.post(url, json=payload, headers=self.headers, timeout=30)
+
+            if response.status_code in [200, 201]:
+                logger.info(f"Successfully triggered rescan for series {series_id}")
+                return True
+            else:
+                logger.error(f"Failed to trigger rescan: {response.status_code} - {response.text[:200]}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error triggering series rescan: {str(e)}")
+            return False
+
+    def trigger_season_rescan(self, series_id, season_number):
+        """
+        Trigger rescan for specific season (PLACEHOLDER for future use)
+
+        Args:
+            series_id (int): Sonarr series ID
+            season_number (int): Season number
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        # Sonarr doesn't have season-specific rescan, so trigger series rescan
+        logger.info(f"Triggering series rescan for series {series_id} (season {season_number})")
+        return self.trigger_series_rescan(series_id)
+
 
 # Singleton instance
 _client = None

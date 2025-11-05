@@ -17,6 +17,14 @@ WEBSHARE_API_URL = 'https://webshare.cz/api'
 PYLOAD_URL = os.getenv('PYLOAD_URL', 'https://pyload.homelab.carpiftw.cz')
 PYLOAD_USER = os.getenv('PYLOAD_USER', 'pyload')
 PYLOAD_PASS = os.getenv('PYLOAD_PASS', 'v4G#2uPXj5dvL9%aWHLs')
+PYLOAD_DOWNLOAD_DIR = os.getenv('PYLOAD_DOWNLOAD_DIR', '/mnt/sdb1/pyload_downlaoded')
+
+# File mover settings
+MONITOR_INTERVAL_SECONDS = int(os.getenv('MONITOR_INTERVAL_SECONDS', '300'))  # 5 minutes
+
+# Plex settings (for future rescan functionality)
+PLEX_URL = os.getenv('PLEX_URL', '')
+PLEX_TOKEN = os.getenv('PLEX_TOKEN', '')
 
 # Sonarr settings
 SONARR_URL = os.getenv('SONARR_URL', 'https://sonarr.homelab.carpiftw.cz')

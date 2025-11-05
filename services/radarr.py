@@ -163,6 +163,38 @@ class RadarrClient:
         logger.info(f"Generated {len(queries)} search queries for {title} ({year})")
         return queries
 
+    def trigger_movie_rescan(self, movie_id):
+        """
+        Trigger rescan for specific movie (PLACEHOLDER for future use)
+
+        Args:
+            movie_id (int): Radarr movie ID
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            url = f"{self.base_url}/api/v3/command"
+            payload = {
+                'name': 'RescanMovie',
+                'movieId': movie_id
+            }
+
+            logger.info(f"Triggering rescan for movie {movie_id}")
+
+            response = requests.post(url, json=payload, headers=self.headers, timeout=30)
+
+            if response.status_code in [200, 201]:
+                logger.info(f"Successfully triggered rescan for movie {movie_id}")
+                return True
+            else:
+                logger.error(f"Failed to trigger rescan: {response.status_code} - {response.text[:200]}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error triggering movie rescan: {str(e)}")
+            return False
+
 
 # Singleton instance
 _client = None

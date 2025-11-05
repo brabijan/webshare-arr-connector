@@ -8,6 +8,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      - /mnt:/mnt
     environment:
       # Webshare credentials
       - WEBSHARE_USER=${WEBSHARE_USER:-mates91}
@@ -17,6 +18,14 @@ services:
       - PYLOAD_URL=${PYLOAD_URL:-https://pyload.homelab.carpiftw.cz}
       - PYLOAD_USER=${PYLOAD_USER:-pyload}
       - PYLOAD_PASS=${PYLOAD_PASS:-v4G#2uPXj5dvL9%aWHLs}
+      - PYLOAD_DOWNLOAD_DIR=${PYLOAD_DOWNLOAD_DIR:-/mnt/sdb1/pyload_downlaoded}
+
+      # File mover settings
+      - MONITOR_INTERVAL_SECONDS=${MONITOR_INTERVAL_SECONDS:-300}
+
+      # Plex settings (for future use)
+      - PLEX_URL=${PLEX_URL:-}
+      - PLEX_TOKEN=${PLEX_TOKEN:-}
 
       # Sonarr settings
       - SONARR_URL=${SONARR_URL:-https://sonarr.homelab.carpiftw.cz}

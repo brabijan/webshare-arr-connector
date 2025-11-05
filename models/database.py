@@ -58,6 +58,13 @@ class DownloadHistory(Base):
     status = Column(String(20), nullable=False, default='pending')  # pending, sent, failed
     error_message = Column(Text, nullable=True)
 
+    # File mover fields
+    download_completed_at = Column(DateTime, nullable=True)  # When pyLoad finished download
+    file_moved_at = Column(DateTime, nullable=True)  # When file was moved to destination
+    final_path = Column(String(1000), nullable=True)  # Final path where file was moved
+    move_error = Column(Text, nullable=True)  # Error during file move
+    rescan_requested_at = Column(DateTime, nullable=True)  # When rescan was triggered
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     def __repr__(self):

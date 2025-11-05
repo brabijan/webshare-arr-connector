@@ -4,3 +4,5 @@ requests==2.31.0
 guessit==3.8.0
 SQLAlchemy==2.0.23
 python-dotenv==1.0.0
+APScheduler==3.10.4
+plexapi==4.15.6
