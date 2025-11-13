@@ -132,6 +132,52 @@ def move_completed_file(record):
             record.move_error = None
             db.commit()
 
+            # Trigger rescan in Sonarr/Radarr/Plex (non-critical)
+            try:
+                rescan_triggered = False
+
+                # Trigger Sonarr rescan for TV shows
+                if record.source == 'sonarr' and record.source_id:
+                    from services.sonarr import get_client as get_sonarr
+                    logger.info(f"Triggering Sonarr rescan for series ID {record.source_id}")
+                    sonarr = get_sonarr()
+                    rescan_triggered = sonarr.trigger_series_rescan(record.source_id)
+                    if rescan_triggered:
+                        logger.info(f"Successfully triggered Sonarr rescan for series {record.source_id}")
+                    else:
+                        logger.warning(f"Sonarr rescan returned False for series {record.source_id}")
+
+                # Trigger Radarr rescan for movies
+                elif record.source == 'radarr' and record.source_id:
+                    from services.radarr import get_client as get_radarr
+                    logger.info(f"Triggering Radarr rescan for movie ID {record.source_id}")
+                    radarr = get_radarr()
+                    rescan_triggered = radarr.trigger_movie_rescan(record.source_id)
+                    if rescan_triggered:
+                        logger.info(f"Successfully triggered Radarr rescan for movie {record.source_id}")
+                    else:
+                        logger.warning(f"Radarr rescan returned False for movie {record.source_id}")
+
+                # Trigger Plex library scan (if configured)
+                if config.PLEX_URL and config.PLEX_TOKEN:
+                    from services.plex import get_client as get_plex
+                    logger.info(f"Triggering Plex library scan for path: {dest_path}")
+                    plex = get_plex()
+                    plex_success = plex.trigger_library_scan(dest_path)
+                    if plex_success:
+                        logger.info(f"Successfully triggered Plex library scan")
+                    else:
+                        logger.warning(f"Plex library scan returned False")
+
+                # Mark rescan as requested in database
+                record.rescan_requested_at = datetime.utcnow()
+                db.commit()
+                logger.info(f"Rescan completed and marked in database at {record.rescan_requested_at}")
+
+            except Exception as e:
+                logger.warning(f"Error triggering rescan (non-critical): {str(e)}", exc_info=True)
+                # Don't fail the overall file move operation
+
             # Try to delete package from pyLoad (non-critical if it fails)
             try:
                 pyload.delete_package(record.pyload_package_id)

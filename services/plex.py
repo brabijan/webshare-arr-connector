@@ -17,7 +17,7 @@ class PlexClient:
 
     def trigger_library_scan(self, path=None):
         """
-        Trigger library scan for specific path (PLACEHOLDER for future use)
+        Trigger library scan for specific path
 
         Args:
             path (str): Optional path to scan. If None, scans all libraries.
@@ -26,34 +26,45 @@ class PlexClient:
             bool: True if successful, False otherwise
         """
         if not self.base_url or not self.token:
-            logger.warning("Plex not configured, skipping library scan")
+            logger.debug("Plex not configured, skipping library scan")
             return False
 
         try:
-            # TODO: Implement Plex library scan using plexapi
-            # from plexapi.server import PlexServer
-            # plex = PlexServer(self.base_url, self.token)
-            #
-            # if path:
-            #     # Find library containing this path
-            #     for section in plex.library.sections():
-            #         for location in section.locations:
-            #             if path.startswith(location):
-            #                 logger.info(f"Scanning Plex library: {section.title}")
-            #                 section.update()
-            #                 return True
-            # else:
-            #     # Scan all libraries
-            #     logger.info("Scanning all Plex libraries")
-            #     for section in plex.library.sections():
-            #         section.update()
-            #     return True
+            from plexapi.server import PlexServer
 
-            logger.info(f"Plex library scan triggered (path: {path}) - PLACEHOLDER")
-            return True
+            logger.debug(f"Connecting to Plex server: {self.base_url}")
+            plex = PlexServer(self.base_url, self.token)
 
+            if path:
+                # Find library containing this path
+                logger.debug(f"Searching for library containing path: {path}")
+                for section in plex.library.sections():
+                    for location in section.locations:
+                        if path.startswith(location):
+                            logger.info(f"Triggering Plex library scan for: {section.title} (path: {path})")
+                            section.update()
+                            logger.info(f"Successfully triggered Plex scan for library: {section.title}")
+                            return True
+
+                logger.warning(f"No Plex library found for path: {path}")
+                return False
+            else:
+                # Scan all libraries
+                logger.info("Triggering full Plex library scan (all libraries)")
+                scanned_count = 0
+                for section in plex.library.sections():
+                    logger.debug(f"Scanning Plex library: {section.title}")
+                    section.update()
+                    scanned_count += 1
+
+                logger.info(f"Successfully triggered Plex scan for {scanned_count} libraries")
+                return True
+
+        except ImportError:
+            logger.error("plexapi module not installed - run 'pip install plexapi'")
+            return False
         except Exception as e:
-            logger.error(f"Error triggering Plex library scan: {str(e)}")
+            logger.error(f"Error triggering Plex library scan: {str(e)}", exc_info=True)
             return False
 
     def trigger_full_library_scan(self):
