@@ -20,7 +20,7 @@ PYLOAD_PASS = os.getenv('PYLOAD_PASS', 'v4G#2uPXj5dvL9%aWHLs')
 PYLOAD_DOWNLOAD_DIR = os.getenv('PYLOAD_DOWNLOAD_DIR', '/mnt/sdb1/pyload_downlaoded')
 
 # File mover settings
-MONITOR_INTERVAL_SECONDS = int(os.getenv('MONITOR_INTERVAL_SECONDS', '300'))  # 5 minutes
+MONITOR_INTERVAL_SECONDS = int(os.getenv('MONITOR_INTERVAL_SECONDS', '60'))  # 1 minute
 
 # Plex settings (for future rescan functionality)
 PLEX_URL = os.getenv('PLEX_URL', '')

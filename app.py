@@ -30,9 +30,9 @@ file_formatter = logging.Formatter(
 )
 file_handler.setFormatter(file_formatter)
 
-# Console handler
+# Console handler (only warnings and errors to stderr)
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO if not config.DEBUG else logging.DEBUG)
+console_handler.setLevel(logging.WARNING if not config.DEBUG else logging.DEBUG)
 console_formatter = logging.Formatter(
     '%(levelname)s [%(name)s] %(message)s'
 )

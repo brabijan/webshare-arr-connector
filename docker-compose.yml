@@ -21,7 +21,7 @@ services:
       - PYLOAD_DOWNLOAD_DIR=${PYLOAD_DOWNLOAD_DIR:-/mnt/sdb1/pyload_downlaoded}
 
       # File mover settings
-      - MONITOR_INTERVAL_SECONDS=${MONITOR_INTERVAL_SECONDS:-300}
+      - MONITOR_INTERVAL_SECONDS=${MONITOR_INTERVAL_SECONDS:-60}
 
       # Plex settings (for future use)
       - PLEX_URL=${PLEX_URL:-}
