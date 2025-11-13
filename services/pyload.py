@@ -81,16 +81,13 @@ def get_package_data(package_id):
         dict: Package data from pyLoad API, or None if error
     """
     try:
-        api_url = f"{config.PYLOAD_URL}/api/getPackageData"
-
-        # pyLoad API expects keyword argument
-        params = {"pid": int(package_id)}
+        # Try positional argument in URL path
+        api_url = f"{config.PYLOAD_URL}/api/getPackageData/{int(package_id)}"
 
         logger.debug(f"Getting package data for package {package_id}")
 
-        response = requests.post(
+        response = requests.get(
             api_url,
-            json=params,
             auth=(config.PYLOAD_USER, config.PYLOAD_PASS),
             timeout=10
         )
