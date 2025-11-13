@@ -162,6 +162,7 @@ def get_package_files(package_id):
         files = []
         for link in links:
             files.append({
+                'fid': link.get('fid'),  # File ID for deletion
                 'name': link.get('name', ''),
                 'status': link.get('status', -1),
                 'size': link.get('size', 0),
@@ -189,7 +190,7 @@ def delete_package(package_id):
     try:
         api_url = f"{config.PYLOAD_URL}/api/deletePackages"
 
-        # pyLoad API expects: [[pid1, pid2, ...]]
+        # pyLoad API expects positional argument: [list of pids]
         params = [[int(package_id)]]
 
         logger.info(f"Deleting package {package_id} from pyLoad")
@@ -205,7 +206,27 @@ def delete_package(package_id):
             logger.info(f"Package {package_id} deleted successfully")
             return True
         else:
-            logger.error(f"Failed to delete package: {response.status_code} - {response.text[:200]}")
+            logger.error(f"Failed to delete package: {response.status_code} - {response.text}")
+            # Try alternative endpoint if deletePackages fails
+            logger.info(f"Trying alternative delete method for package {package_id}")
+            alt_url = f"{config.PYLOAD_URL}/api/deleteFiles"
+
+            # Get files in package first
+            files = get_package_files(package_id)
+            if files:
+                file_ids = [f.get('fid') for f in files if f.get('fid')]
+                if file_ids:
+                    alt_params = [file_ids]
+                    alt_response = requests.post(
+                        alt_url,
+                        json=alt_params,
+                        auth=(config.PYLOAD_USER, config.PYLOAD_PASS),
+                        timeout=10
+                    )
+                    if alt_response.status_code == 200:
+                        logger.info(f"Deleted files from package {package_id} using alternative method")
+                        return True
+
             return False
 
     except Exception as e:
