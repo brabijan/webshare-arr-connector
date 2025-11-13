@@ -83,8 +83,8 @@ def get_package_data(package_id):
     try:
         api_url = f"{config.PYLOAD_URL}/api/getPackageData"
 
-        # pyLoad API expects positional argument: [pid]
-        params = [int(package_id)]
+        # pyLoad API expects keyword argument
+        params = {"pid": int(package_id)}
 
         logger.debug(f"Getting package data for package {package_id}")
 
