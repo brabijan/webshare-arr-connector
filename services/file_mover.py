@@ -116,15 +116,35 @@ def move_completed_file(record):
             if not source_path:
                 return False, f"Downloaded file not found: {record.filename}"
 
+            # Verify source file still exists (might have been moved by another process)
+            if not Path(source_path).exists():
+                # Check if file already exists at destination
+                if Path(dest_path).exists():
+                    logger.warning(f"Source file gone but destination exists - assuming already moved: {dest_path}")
+                else:
+                    return False, f"Source file disappeared: {source_path}"
+
             # Create destination directory if needed
             dest_dir = Path(dest_path).parent
             dest_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Ensured destination directory exists: {dest_dir}")
 
-            # Move file
-            logger.info(f"Moving file from {source_path} to {dest_path}")
-            shutil.move(source_path, dest_path)
-            logger.info(f"File moved successfully: {dest_path}")
+            # Move file (handles cross-device moves automatically)
+            if Path(source_path).exists():
+                logger.info(f"Moving file from {source_path} to {dest_path}")
+                try:
+                    # Use copy2 + remove for cross-device compatibility
+                    shutil.copy2(source_path, dest_path)
+                    os.remove(source_path)
+                    logger.info(f"File moved successfully: {dest_path}")
+                except Exception as move_error:
+                    # If copy succeeded but remove failed, that's ok
+                    if Path(dest_path).exists() and not Path(source_path).exists():
+                        logger.warning(f"File copied but source cleanup had error: {move_error}")
+                    else:
+                        raise
+            else:
+                logger.warning(f"Source file already moved, skipping move operation")
 
             # Update database - commit BEFORE trying to delete package
             record.file_moved_at = datetime.utcnow()
@@ -168,6 +188,8 @@ def move_completed_file(record):
                         logger.info(f"Successfully triggered Plex library scan")
                     else:
                         logger.warning(f"Plex library scan returned False")
+                else:
+                    logger.debug(f"Plex not configured (PLEX_URL={bool(config.PLEX_URL)}, PLEX_TOKEN={bool(config.PLEX_TOKEN)}), skipping Plex scan")
 
                 # Mark rescan as requested in database
                 record.rescan_requested_at = datetime.utcnow()

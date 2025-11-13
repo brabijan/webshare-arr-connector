@@ -24,8 +24,8 @@ services:
       - MONITOR_INTERVAL_SECONDS=${MONITOR_INTERVAL_SECONDS:-60}
 
       # Plex settings (for future use)
-      - PLEX_URL=${PLEX_URL:-}
-      - PLEX_TOKEN=${PLEX_TOKEN:-}
+      - PLEX_URL=${PLEX_URL:-https://plex.homelab.carpiftw.cz}
+      - PLEX_TOKEN=${PLEX_TOKEN:-tNfiB4gzzsm1CzoEa9hJ}
 
       # Sonarr settings
       - SONARR_URL=${SONARR_URL:-https://sonarr.homelab.carpiftw.cz}
