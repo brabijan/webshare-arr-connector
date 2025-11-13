@@ -113,12 +113,14 @@ def is_package_finished(package_id):
         package_id: pyLoad package ID
 
     Returns:
-        bool: True if finished, False otherwise
+        bool or None: True if finished, False if still downloading, None if package doesn't exist
     """
     try:
         data = get_package_data(package_id)
         if not data:
-            return False
+            # Package doesn't exist in pyLoad (might have been deleted)
+            logger.debug(f"Package {package_id} not found in pyLoad")
+            return None
 
         # Check links (files) in package
         links = data.get('links', [])
@@ -139,7 +141,7 @@ def is_package_finished(package_id):
 
     except Exception as e:
         logger.error(f"Error checking if package finished: {str(e)}")
-        return False
+        return None
 
 
 def get_package_files(package_id):
