@@ -54,12 +54,20 @@ app.register_blueprint(webhooks_bp)
 
 @app.before_request
 def before_first_request():
-    """Initialize database on first request"""
+    """Initialize database and scheduler on first request"""
     if not hasattr(app, 'db_initialized'):
         logger.info("Initializing database...")
         init_db()
         app.db_initialized = True
         logger.info("Database initialized successfully")
+
+        # Start scheduler (only once per application instance)
+        logger.info("Starting file mover scheduler...")
+        try:
+            scheduler.start_scheduler()
+            logger.info(f"File mover scheduler started (every {config.MONITOR_INTERVAL_SECONDS} seconds)")
+        except Exception as e:
+            logger.error(f"Failed to start scheduler: {e}")
 
 
 @app.cli.command('cleanup')
