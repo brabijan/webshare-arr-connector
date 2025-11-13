@@ -56,30 +56,7 @@ def find_downloaded_file(package_id, expected_filename):
             logger.error(f"pyLoad download directory does not exist: {pyload_dir}")
             return None
 
-        # Get actual filenames from pyLoad API
-        files = pyload.get_package_files(package_id)
-        if files:
-            # Try each filename from pyLoad
-            for file_info in files:
-                actual_filename = file_info.get('name', '')
-                if actual_filename:
-                    logger.debug(f"Trying pyLoad filename: {actual_filename}")
-
-                    # Try to find file directly
-                    direct_path = pyload_dir / actual_filename
-                    if direct_path.exists():
-                        logger.info(f"Found file directly: {direct_path}")
-                        return str(direct_path)
-
-                    # Try in subdirectories
-                    for root, dirs, filenames in os.walk(pyload_dir):
-                        if actual_filename in filenames:
-                            found_path = Path(root) / actual_filename
-                            logger.info(f"Found file in subdirectory: {found_path}")
-                            return str(found_path)
-
-        # Fallback: try with expected filename
-        logger.debug(f"Trying expected filename: {expected_filename}")
+        # Try to find file directly
         direct_path = pyload_dir / expected_filename
         if direct_path.exists():
             logger.info(f"Found file directly: {direct_path}")
@@ -116,18 +93,6 @@ def move_completed_file(record):
         if not record.pyload_package_id:
             return False, "No pyLoad package ID"
 
-        # If file was already moved, just try to clean up package
-        if record.file_moved_at:
-            logger.info(f"File already moved for record {record.id}, attempting to clean up package {record.pyload_package_id}")
-            deleted = pyload.delete_package(record.pyload_package_id)
-            if deleted:
-                logger.info(f"Deleted package {record.pyload_package_id} from pyLoad")
-                return True, None
-            else:
-                # Package deletion failed, but file is already moved so it's not critical
-                logger.warning(f"Could not delete package {record.pyload_package_id}, but file was already moved")
-                return True, None
-
         is_finished = pyload.is_package_finished(record.pyload_package_id)
         if not is_finished:
             logger.debug(f"Package {record.pyload_package_id} not finished yet")
@@ -141,15 +106,15 @@ def move_completed_file(record):
                 db.commit()
                 logger.info(f"Marked package {record.pyload_package_id} as completed")
 
-            # Find downloaded file
-            source_path = find_downloaded_file(record.pyload_package_id, record.filename)
-            if not source_path:
-                return False, f"Downloaded file not found: {record.filename}"
-
             # Construct destination path
             dest_path = construct_destination_path(record)
             if not dest_path:
                 return False, "Could not construct destination path"
+
+            # Find downloaded file in pyLoad directory
+            source_path = find_downloaded_file(record.pyload_package_id, record.filename)
+            if not source_path:
+                return False, f"Downloaded file not found: {record.filename}"
 
             # Create destination directory if needed
             dest_dir = Path(dest_path).parent
@@ -161,21 +126,18 @@ def move_completed_file(record):
             shutil.move(source_path, dest_path)
             logger.info(f"File moved successfully: {dest_path}")
 
-            # Update database - mark as moved FIRST before trying to delete
+            # Update database - commit BEFORE trying to delete package
             record.file_moved_at = datetime.utcnow()
             record.final_path = dest_path
             record.move_error = None
             db.commit()
 
-            # Delete package from pyLoad (best effort - not critical if it fails)
+            # Try to delete package from pyLoad (non-critical if it fails)
             try:
-                deleted = pyload.delete_package(record.pyload_package_id)
-                if deleted:
-                    logger.info(f"Deleted package {record.pyload_package_id} from pyLoad")
-                else:
-                    logger.warning(f"Failed to delete package {record.pyload_package_id} from pyLoad (non-critical)")
+                pyload.delete_package(record.pyload_package_id)
+                logger.info(f"Deleted package {record.pyload_package_id} from pyLoad")
             except Exception as e:
-                logger.warning(f"Error deleting package {record.pyload_package_id}: {e} (non-critical)")
+                logger.warning(f"Could not delete package {record.pyload_package_id}: {e} (non-critical)")
 
             return True, None
 
