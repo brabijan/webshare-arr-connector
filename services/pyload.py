@@ -189,8 +189,8 @@ def delete_package(package_id):
     try:
         api_url = f"{config.PYLOAD_URL}/api/deletePackages"
 
-        # pyLoad API expects positional argument as single-level list
-        params = [int(package_id)]
+        # pyLoad API expects keyword argument "package_ids" with list of package IDs
+        params = {"package_ids": [int(package_id)]}
 
         logger.info(f"Deleting package {package_id} from pyLoad")
 
