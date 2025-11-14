@@ -959,6 +959,7 @@ def library_season_episodes(series_id, season_num):
                         'overview': ep.get('overview'),
                         'episodeFileId': file_id,
                         'fileMetadata': {
+                            'episodeFileId': file_id,  # Add here for easier access in frontend
                             'filename': filename,
                             'size': file_data.get('size', 0),
                             'quality': file_data.get('quality', {}).get('quality', {}).get('name', 'Unknown'),
@@ -1060,12 +1061,11 @@ def pending_upgrades_series():
         db = get_db_session()
         sonarr = get_sonarr()
 
-        # Get upgrades waiting for decision
+        # Get upgrades waiting for decision (including downloading)
         pending = db.query(DownloadHistory).filter(
             DownloadHistory.source == 'sonarr',
             DownloadHistory.is_upgrade == True,
-            DownloadHistory.upgrade_decision.is_(None),
-            DownloadHistory.download_completed_at.isnot(None)
+            DownloadHistory.upgrade_decision.is_(None)
         ).all()
 
         results = []
@@ -1104,6 +1104,17 @@ def pending_upgrades_series():
                 old_filename = old_file.get('relativePath', '').split('/')[-1]
                 old_path = old_file.get('path')  # Full path to file
 
+                # Always parse filename to get source type (ffprobe can't detect this)
+                old_parsed = parse_filename(old_filename)
+
+                def convert_languages(lang_value):
+                    if lang_value is None:
+                        return []
+                    if isinstance(lang_value, list):
+                        return [str(lang) for lang in lang_value]
+                    else:
+                        return [str(lang_value)]
+
                 # Try to extract real metadata from file
                 if old_path:
                     logger.info(f"Extracting real metadata from old file: {old_path}")
@@ -1115,25 +1126,15 @@ def pending_upgrades_series():
                             'size': old_file.get('size', 0),
                             'quality': formatted.get('resolution', 'Unknown'),
                             'codec': formatted.get('video_codec', 'Unknown'),
-                            'source': 'Unknown',  # Source type not in metadata
+                            'source': old_parsed.get('source_type_normalized', 'Unknown'),  # From filename
                             'audio_languages': formatted.get('audio_languages', []),
                             'subtitles': formatted.get('subtitle_languages', []),
                         }
-                        logger.info(f"Successfully extracted real metadata from old file")
+                        logger.info(f"Successfully extracted real metadata from old file (source from filename)")
 
                 # Fallback to filename parsing if extraction failed
                 if not old_metadata:
                     logger.warning(f"Falling back to filename parsing for old file: {old_filename}")
-                    old_parsed = parse_filename(old_filename)
-
-                    def convert_languages(lang_value):
-                        if lang_value is None:
-                            return []
-                        if isinstance(lang_value, list):
-                            return [str(lang) for lang in lang_value]
-                        else:
-                            return [str(lang_value)]
-
                     old_metadata = {
                         'filename': old_filename,
                         'size': old_file.get('size', 0),
@@ -1146,6 +1147,18 @@ def pending_upgrades_series():
 
             # Extract real metadata from new file
             new_metadata = None
+
+            # Always parse filename to get source type (ffprobe can't detect this)
+            new_parsed = parse_filename(record.filename)
+
+            def convert_languages_new(lang_value):
+                if lang_value is None:
+                    return []
+                if isinstance(lang_value, list):
+                    return [str(lang) for lang in lang_value]
+                else:
+                    return [str(lang_value)]
+
             # Find the downloaded file
             new_file_path = find_downloaded_file(record.pyload_package_id, record.filename)
             if new_file_path:
@@ -1158,25 +1171,15 @@ def pending_upgrades_series():
                         'size': record.file_size or formatted.get('file_size', 0),
                         'quality': formatted.get('resolution', 'Unknown'),
                         'codec': formatted.get('video_codec', 'Unknown'),
-                        'source': 'Unknown',  # Source type not in metadata
+                        'source': new_parsed.get('source_type_normalized', 'Unknown'),  # From filename
                         'audio_languages': formatted.get('audio_languages', []),
                         'subtitles': formatted.get('subtitle_languages', []),
                     }
-                    logger.info(f"Successfully extracted real metadata from new file")
+                    logger.info(f"Successfully extracted real metadata from new file (source from filename)")
 
             # Fallback to filename parsing if extraction failed
             if not new_metadata:
                 logger.warning(f"Falling back to filename parsing for new file: {record.filename}")
-                new_parsed = parse_filename(record.filename)
-
-                def convert_languages_new(lang_value):
-                    if lang_value is None:
-                        return []
-                    if isinstance(lang_value, list):
-                        return [str(lang) for lang in lang_value]
-                    else:
-                        return [str(lang_value)]
-
                 new_metadata = {
                     'filename': record.filename,
                     'size': record.file_size,
@@ -1191,6 +1194,10 @@ def pending_upgrades_series():
             episode_str = f"S{record.season:02d}E{record.episode:02d}"
             title = f"{record.item_title} - {episode_str}"
 
+            # Determine download status
+            is_downloading = record.download_completed_at is None
+            download_status = 'downloading' if is_downloading else 'completed'
+
             results.append({
                 'id': record.id,
                 'title': title,
@@ -1199,6 +1206,7 @@ def pending_upgrades_series():
                 'episode': record.episode,
                 'current': old_metadata,
                 'new': new_metadata,
+                'download_status': download_status,
                 'created_at': record.created_at.isoformat() if record.created_at else None
             })
 
@@ -1223,12 +1231,11 @@ def pending_upgrades_movies():
         db = get_db_session()
         radarr = get_radarr()
 
-        # Get upgrades waiting for decision
+        # Get upgrades waiting for decision (including downloading)
         pending = db.query(DownloadHistory).filter(
             DownloadHistory.source == 'radarr',
             DownloadHistory.is_upgrade == True,
-            DownloadHistory.upgrade_decision.is_(None),
-            DownloadHistory.download_completed_at.isnot(None)
+            DownloadHistory.upgrade_decision.is_(None)
         ).all()
 
         results = []
@@ -1266,6 +1273,17 @@ def pending_upgrades_movies():
                 old_filename = old_file.get('relativePath', '').split('/')[-1]
                 old_path = old_file.get('path')  # Full path to file
 
+                # Always parse filename to get source type (ffprobe can't detect this)
+                old_parsed = parse_filename(old_filename)
+
+                def convert_languages(lang_value):
+                    if lang_value is None:
+                        return []
+                    if isinstance(lang_value, list):
+                        return [str(lang) for lang in lang_value]
+                    else:
+                        return [str(lang_value)]
+
                 # Try to extract real metadata from file
                 if old_path:
                     logger.info(f"Extracting real metadata from old file: {old_path}")
@@ -1277,25 +1295,15 @@ def pending_upgrades_movies():
                             'size': old_file.get('size', 0),
                             'quality': formatted.get('resolution', 'Unknown'),
                             'codec': formatted.get('video_codec', 'Unknown'),
-                            'source': 'Unknown',  # Source type not in metadata
+                            'source': old_parsed.get('source_type_normalized', 'Unknown'),  # From filename
                             'audio_languages': formatted.get('audio_languages', []),
                             'subtitles': formatted.get('subtitle_languages', []),
                         }
-                        logger.info(f"Successfully extracted real metadata from old file")
+                        logger.info(f"Successfully extracted real metadata from old file (source from filename)")
 
                 # Fallback to filename parsing if extraction failed
                 if not old_metadata:
                     logger.warning(f"Falling back to filename parsing for old file: {old_filename}")
-                    old_parsed = parse_filename(old_filename)
-
-                    def convert_languages(lang_value):
-                        if lang_value is None:
-                            return []
-                        if isinstance(lang_value, list):
-                            return [str(lang) for lang in lang_value]
-                        else:
-                            return [str(lang_value)]
-
                     old_metadata = {
                         'filename': old_filename,
                         'size': old_file.get('size', 0),
@@ -1308,6 +1316,18 @@ def pending_upgrades_movies():
 
             # Extract real metadata from new file
             new_metadata = None
+
+            # Always parse filename to get source type (ffprobe can't detect this)
+            new_parsed = parse_filename(record.filename)
+
+            def convert_languages_new(lang_value):
+                if lang_value is None:
+                    return []
+                if isinstance(lang_value, list):
+                    return [str(lang) for lang in lang_value]
+                else:
+                    return [str(lang_value)]
+
             # Find the downloaded file
             new_file_path = find_downloaded_file(record.pyload_package_id, record.filename)
             if new_file_path:
@@ -1320,25 +1340,15 @@ def pending_upgrades_movies():
                         'size': record.file_size or formatted.get('file_size', 0),
                         'quality': formatted.get('resolution', 'Unknown'),
                         'codec': formatted.get('video_codec', 'Unknown'),
-                        'source': 'Unknown',  # Source type not in metadata
+                        'source': new_parsed.get('source_type_normalized', 'Unknown'),  # From filename
                         'audio_languages': formatted.get('audio_languages', []),
                         'subtitles': formatted.get('subtitle_languages', []),
                     }
-                    logger.info(f"Successfully extracted real metadata from new file")
+                    logger.info(f"Successfully extracted real metadata from new file (source from filename)")
 
             # Fallback to filename parsing if extraction failed
             if not new_metadata:
                 logger.warning(f"Falling back to filename parsing for new file: {record.filename}")
-                new_parsed = parse_filename(record.filename)
-
-                def convert_languages_new(lang_value):
-                    if lang_value is None:
-                        return []
-                    if isinstance(lang_value, list):
-                        return [str(lang) for lang in lang_value]
-                    else:
-                        return [str(lang_value)]
-
                 new_metadata = {
                     'filename': record.filename,
                     'size': record.file_size,
@@ -1352,6 +1362,10 @@ def pending_upgrades_movies():
             # Format title
             title = f"{record.item_title} ({record.year})" if record.year else record.item_title
 
+            # Determine download status
+            is_downloading = record.download_completed_at is None
+            download_status = 'downloading' if is_downloading else 'completed'
+
             results.append({
                 'id': record.id,
                 'title': title,
@@ -1359,6 +1373,7 @@ def pending_upgrades_movies():
                 'year': record.year,
                 'current': old_metadata,
                 'new': new_metadata,
+                'download_status': download_status,
                 'created_at': record.created_at.isoformat() if record.created_at else None
             })
 
@@ -1386,6 +1401,26 @@ def search_upgrade():
             season = data.get('season')
             episode = data.get('episode')
             episode_file_id = data.get('episode_file_id')
+
+            # Check if upgrade already exists for this episode
+            db = get_db_session()
+            try:
+                existing_upgrade = db.query(DownloadHistory).filter(
+                    DownloadHistory.source == 'sonarr',
+                    DownloadHistory.source_id == series_id,
+                    DownloadHistory.season == season,
+                    DownloadHistory.episode == episode,
+                    DownloadHistory.is_upgrade == True,
+                    DownloadHistory.upgrade_decision.is_(None)
+                ).first()
+
+                if existing_upgrade:
+                    return jsonify({
+                        'error': 'Upgrade already pending for this episode',
+                        'existing_upgrade_id': existing_upgrade.id
+                    }), 409
+            finally:
+                db.close()
 
             sonarr = get_sonarr()
             series = sonarr.get_series_by_id(series_id)
@@ -1445,6 +1480,24 @@ def search_upgrade():
         elif source == 'radarr':
             movie_id = data.get('movie_id')
             movie_file_id = data.get('movie_file_id')
+
+            # Check if upgrade already exists for this movie
+            db = get_db_session()
+            try:
+                existing_upgrade = db.query(DownloadHistory).filter(
+                    DownloadHistory.source == 'radarr',
+                    DownloadHistory.source_id == movie_id,
+                    DownloadHistory.is_upgrade == True,
+                    DownloadHistory.upgrade_decision.is_(None)
+                ).first()
+
+                if existing_upgrade:
+                    return jsonify({
+                        'error': 'Upgrade already pending for this movie',
+                        'existing_upgrade_id': existing_upgrade.id
+                    }), 409
+            finally:
+                db.close()
 
             radarr = get_radarr()
             movie = radarr.get_movie_by_id(movie_id)

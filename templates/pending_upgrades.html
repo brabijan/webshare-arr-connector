@@ -46,12 +46,37 @@
         padding: 20px;
         border-bottom: 2px solid #3a3a3a;
         background: #1f1f1f;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
     .upgrade-title {
         font-size: 1.3em;
         font-weight: bold;
         color: #fff;
         margin: 0;
+    }
+    .download-badge {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-size: 0.85em;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .download-badge.downloading {
+        background: #ff9800;
+        color: #000;
+        animation: pulse 2s ease-in-out infinite;
+    }
+    .download-badge.completed {
+        background: #4caf50;
+        color: #fff;
+    }
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
     }
     .comparison-container {
         display: grid;
@@ -321,10 +346,19 @@
         const source = formatAttribute('📦', 'source', currentAttrs.source, newAttrs.source);
         const size = formatAttribute('💾', 'size', currentAttrs.size, newAttrs.size);
 
+        // Check download status
+        const isDownloading = upgrade.download_status === 'downloading';
+        const statusBadge = isDownloading
+            ? '<span class="download-badge downloading">Downloading...</span>'
+            : '<span class="download-badge completed">Downloaded</span>';
+        const disabledAttr = isDownloading ? 'disabled' : '';
+        const versionHeader = isDownloading ? 'NEW VERSION (downloading...)' : 'NEW VERSION (downloaded)';
+
         return `
             <div class="upgrade-card" data-upgrade-id="${upgrade.id}">
                 <div class="upgrade-header">
                     <h3 class="upgrade-title">${upgrade.title}</h3>
+                    ${statusBadge}
                 </div>
                 <div class="comparison-container">
                     <div class="version-panel current">
@@ -340,7 +374,7 @@
                         </div>
                     </div>
                     <div class="version-panel new">
-                        <div class="version-header">NEW VERSION (downloaded)</div>
+                        <div class="version-header">${versionHeader}</div>
                         <div class="file-name">${(new_file && (new_file.file_path || new_file.filename)) || 'N/A'}</div>
                         <div class="attributes">
                             ${resolution.new}
@@ -353,15 +387,15 @@
                     </div>
                 </div>
                 <div class="upgrade-footer">
-                    <div class="decision-label">Decision:</div>
+                    <div class="decision-label">${isDownloading ? 'Waiting for download to complete...' : 'Decision:'}</div>
                     <div class="decision-buttons">
-                        <button class="btn btn-secondary" onclick="confirmUpgrade('${upgrade.id}', 'keep_old', '${type}')">
+                        <button class="btn btn-secondary" onclick="confirmUpgrade('${upgrade.id}', 'keep_old', '${type}')" ${disabledAttr}>
                             Keep Old
                         </button>
-                        <button class="btn btn-info" onclick="confirmUpgrade('${upgrade.id}', 'keep_both', '${type}')">
+                        <button class="btn btn-info" onclick="confirmUpgrade('${upgrade.id}', 'keep_both', '${type}')" ${disabledAttr}>
                             Keep Both
                         </button>
-                        <button class="btn btn-primary" onclick="confirmUpgrade('${upgrade.id}', 'use_new', '${type}')">
+                        <button class="btn btn-primary" onclick="confirmUpgrade('${upgrade.id}', 'use_new', '${type}')" ${disabledAttr}>
                             Use New
                         </button>
                     </div>

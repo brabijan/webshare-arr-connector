@@ -635,9 +635,15 @@ async function searchUpgrade(event, episode, meta) {
     }
 }
 
+// Store upgrade metadata globally for use in downloadUpgrade
+let currentUpgradeMetadata = null;
+
 function renderUpgradeResults(results, pendingId, upgradeMetadata) {
     const modalResults = document.getElementById('modal-results');
     modalResults.innerHTML = '';
+
+    // Store metadata globally
+    currentUpgradeMetadata = upgradeMetadata;
 
     results.forEach((result, index) => {
         const card = document.createElement('div');
@@ -656,14 +662,14 @@ function renderUpgradeResults(results, pendingId, upgradeMetadata) {
                 ${result.file_size_gb ? `<span class="badge badge-size">${result.file_size_gb.toFixed(2)} GB</span>` : ''}
                 ${score.total !== undefined ? `<span class="badge badge-score">Score: ${score.total}</span>` : ''}
             </div>
-            <button class="btn" onclick="downloadUpgrade(${pendingId}, ${index}, ${JSON.stringify(upgradeMetadata).replace(/"/g, '&quot;')})">Download This Upgrade</button>
+            <button class="btn" onclick="downloadUpgrade(${pendingId}, ${index})">Download This Upgrade</button>
         `;
 
         modalResults.appendChild(card);
     });
 }
 
-async function downloadUpgrade(pendingId, resultIndex, upgradeMetadata) {
+async function downloadUpgrade(pendingId, resultIndex) {
     try {
         // Disable all buttons
         document.querySelectorAll('.modal .btn').forEach(btn => {
@@ -677,7 +683,7 @@ async function downloadUpgrade(pendingId, resultIndex, upgradeMetadata) {
             body: JSON.stringify({
                 pending_id: pendingId,
                 result_index: resultIndex,
-                upgrade_metadata: upgradeMetadata
+                upgrade_metadata: currentUpgradeMetadata
             })
         });
 
