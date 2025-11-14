@@ -1,0 +1,738 @@
+{% extends "base.html" %}
+
+{% block title %}Library - {{ series.title }} - Season {{ season_number }}{% endblock %}
+
+{% block content %}
+<!-- Breadcrumb Navigation -->
+<div style="margin-bottom: 20px;">
+    <a href="/library" style="color: #4CAF50; text-decoration: none;">Library</a>
+    <span style="color: #666;"> / </span>
+    <a href="/library/series/{{ series.id }}/seasons" style="color: #4CAF50; text-decoration: none;">{{ series.title }}</a>
+    <span style="color: #666;"> / </span>
+    <span style="color: #999;">Season {{ season_number }}</span>
+</div>
+
+<div style="display: flex; align-items: flex-start; gap: 30px; margin-bottom: 40px;">
+    {% if series.poster_url %}
+    <img src="{{ series.poster_url }}" alt="{{ series.title }}"
+         style="width: 150px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.3);"
+         onerror="this.style.display='none'"/>
+    {% endif %}
+
+    <div>
+        <h1 style="margin: 0 0 10px 0;">{{ series.title }}</h1>
+        <h2 style="margin: 0 0 10px 0; color: #999;">Season {{ season_number }}</h2>
+        <p style="color: #ccc;">Episodes in your library</p>
+    </div>
+</div>
+
+<div id="loading" style="display: block; text-align: center; padding: 40px;">
+    <p>Loading episodes...</p>
+</div>
+
+<!-- Search & Filters for Episodes -->
+<div id="filters-section" class="filters-section" style="display: none;">
+    <div class="filter-row">
+        <input type="text" id="searchEpisodes" class="form-control" placeholder="Search by episode name...">
+        <select id="filterResolution" class="form-control">
+            <option value="">All Resolutions</option>
+            <option value="2160p">2160p / 4K</option>
+            <option value="1080p">1080p</option>
+            <option value="720p">720p</option>
+        </select>
+        <select id="filterCzechAudio" class="form-control">
+            <option value="">Any Audio</option>
+            <option value="yes">Has Czech Audio</option>
+            <option value="no">No Czech Audio</option>
+        </select>
+        <select id="filterCzechSubs" class="form-control">
+            <option value="">Any Subtitles</option>
+            <option value="yes">Has Czech Subs</option>
+            <option value="no">No Czech Subs</option>
+        </select>
+        <select id="filterCodec" class="form-control">
+            <option value="">Any Codec</option>
+            <option value="H.264">H.264 / x264</option>
+            <option value="HEVC">HEVC / H.265</option>
+        </select>
+    </div>
+</div>
+
+<div id="episodes-container" style="display: none;">
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 100px;">Episode</th>
+                <th>Name</th>
+                <th style="width: 120px;">Resolution</th>
+                <th style="width: 100px;">Codec</th>
+                <th style="width: 120px;">Audio</th>
+                <th style="width: 120px;">Subtitles</th>
+                <th style="width: 100px;">Source</th>
+                <th style="width: 100px;">Size</th>
+                <th style="width: 150px;">Action</th>
+            </tr>
+        </thead>
+        <tbody id="episodes-list">
+        </tbody>
+    </table>
+</div>
+
+<div id="no-episodes" style="display: none;" class="empty-state">
+    <h3>No episodes found</h3>
+    <p>This season has no downloaded episodes yet.</p>
+</div>
+
+<!-- Toast Container -->
+<div id="toast-container" class="toast-container"></div>
+
+<!-- Search Results Modal -->
+<div id="search-modal" class="modal">
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2 id="modal-title">Search Results - Upgrade</h2>
+        <div id="modal-loading" style="text-align: center; padding: 40px;">
+            <p>Searching for better version...</p>
+        </div>
+        <div id="modal-results"></div>
+    </div>
+</div>
+
+<style>
+/* Filters Section */
+.filters-section {
+    margin-bottom: 25px;
+}
+
+.filter-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+    gap: 12px;
+    align-items: center;
+}
+
+.form-control {
+    width: 100%;
+    padding: 10px 14px;
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #4CAF50;
+    background: #2f2f2f;
+}
+
+.form-control::placeholder {
+    color: #666;
+}
+
+/* Upgrade Candidate Row Highlights */
+tr.upgrade-candidate-no-czech-audio {
+    background: rgba(244, 67, 54, 0.15) !important;
+    border-left: 3px solid #f44336;
+}
+
+tr.upgrade-candidate-subs-only {
+    background: rgba(255, 193, 7, 0.15) !important;
+    border-left: 3px solid #FFC107;
+}
+
+tr.upgrade-candidate-low-res {
+    background: rgba(33, 150, 243, 0.15) !important;
+    border-left: 3px solid #2196F3;
+}
+
+.badge {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: bold;
+    display: inline-block;
+    margin-right: 4px;
+}
+
+.badge-resolution {
+    background: #2196F3;
+    color: white;
+}
+
+.badge-codec {
+    background: #607D8B;
+    color: white;
+}
+
+.badge-codec-warning {
+    background: #FFC107;
+    color: #000;
+}
+
+.badge-source {
+    background: #9C27B0;
+    color: white;
+}
+
+.badge-language {
+    background: #4CAF50;
+    color: white;
+}
+
+.badge-language-missing {
+    background: #f44336;
+    color: white;
+}
+
+.btn {
+    padding: 8px 16px;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.2s;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn:hover {
+    background: #45a049;
+}
+
+.btn:disabled {
+    background: #666;
+    cursor: not-allowed;
+}
+
+/* Toast Notification */
+.toast-container {
+    position: fixed;
+    bottom: 30px;
+    right: 30px;
+    z-index: 2000;
+}
+
+.toast {
+    background: #4CAF50;
+    color: white;
+    padding: 16px 24px;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    margin-bottom: 10px;
+    min-width: 300px;
+    animation: slideIn 0.3s ease-out, fadeOut 0.3s ease-in 2.7s;
+}
+
+.toast.error {
+    background: #f44336;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(400px);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes fadeOut {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0;
+    }
+}
+
+/* Modal */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.7);
+}
+
+.modal-content {
+    background-color: #1a1a1a;
+    margin: 5% auto;
+    padding: 30px;
+    border: 1px solid #333;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 900px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close:hover {
+    color: #fff;
+}
+
+.result-card {
+    background: #252525;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 10px;
+}
+
+.result-title {
+    font-size: 14px;
+    color: #fff;
+    margin-bottom: 10px;
+    word-break: break-word;
+}
+
+.result-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.badge-quality {
+    background: #2196F3;
+    color: white;
+}
+
+.badge-czech {
+    background: #FF5722;
+    color: white;
+}
+
+.badge-lang {
+    background: #9C27B0;
+    color: white;
+}
+
+.badge-size {
+    background: #607D8B;
+    color: white;
+}
+
+.badge-score {
+    background: #4CAF50;
+    color: white;
+}
+</style>
+
+<script>
+const seriesId = {{ series.id }};
+const seasonNumber = {{ season_number }};
+let allEpisodes = [];
+let filteredEpisodes = [];
+
+// Toast notification function
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type === 'error' ? 'error' : ''}`;
+    toast.textContent = message;
+
+    container.appendChild(toast);
+
+    setTimeout(() => {
+        toast.remove();
+    }, 3000);
+}
+
+// Format file size
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Load episodes from API
+async function loadEpisodes() {
+    const loading = document.getElementById('loading');
+    const container = document.getElementById('episodes-container');
+    const filtersSection = document.getElementById('filters-section');
+    const noEpisodes = document.getElementById('no-episodes');
+
+    try {
+        const response = await fetch(`/api/library/series/${seriesId}/season/${seasonNumber}`);
+        const episodes = await response.json();
+
+        loading.style.display = 'none';
+
+        if (episodes.length > 0) {
+            allEpisodes = episodes;
+            filteredEpisodes = episodes;
+            container.style.display = 'block';
+            filtersSection.style.display = 'block';
+            renderEpisodes(episodes);
+        } else {
+            noEpisodes.style.display = 'block';
+        }
+    } catch (error) {
+        loading.style.display = 'none';
+        showToast(`Error loading episodes: ${error.message}`, 'error');
+    }
+}
+
+// Check if episode needs upgrade
+function getUpgradeClass(episode) {
+    const meta = episode.fileMetadata || {};
+
+    // Check for Czech audio
+    const audioLangs = meta.audio_languages || [];
+    const hasCzechAudio = audioLangs.some(lang =>
+        lang && (lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz' || lang.toLowerCase() === 'ces')
+    );
+
+    // Check for Czech subtitles
+    const subLangs = meta.subtitle_languages || [];
+    const hasCzechSubs = subLangs.some(lang =>
+        lang && (lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz' || lang.toLowerCase() === 'ces')
+    );
+
+    // Check resolution
+    const resolution = meta.resolution || '';
+    const resolutionValue = parseInt(resolution) || 0;
+
+    // Priority: Missing CZ audio > Only CZ subs > Low resolution
+    if (audioLangs.length > 0 && !hasCzechAudio) {
+        return 'upgrade-candidate-no-czech-audio';
+    }
+    if (!hasCzechAudio && hasCzechSubs) {
+        return 'upgrade-candidate-subs-only';
+    }
+    if (resolutionValue < 1080) {
+        return 'upgrade-candidate-low-res';
+    }
+
+    return '';
+}
+
+// Filter episodes
+function filterEpisodes() {
+    const searchText = document.getElementById('searchEpisodes').value.toLowerCase();
+    const resolution = document.getElementById('filterResolution').value;
+    const czechAudio = document.getElementById('filterCzechAudio').value;
+    const czechSubs = document.getElementById('filterCzechSubs').value;
+    const codec = document.getElementById('filterCodec').value;
+
+    filteredEpisodes = allEpisodes.filter(episode => {
+        // Search by episode name
+        if (searchText && !episode.title.toLowerCase().includes(searchText)) {
+            return false;
+        }
+
+        const meta = episode.fileMetadata || {};
+
+        // Filter by resolution
+        if (resolution && meta.resolution !== resolution) {
+            return false;
+        }
+
+        // Filter by Czech audio
+        if (czechAudio) {
+            const audioLangs = meta.audio_languages || [];
+            const hasCzech = audioLangs.some(lang =>
+                lang && (lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz' || lang.toLowerCase() === 'ces')
+            );
+            if (czechAudio === 'yes' && !hasCzech) return false;
+            if (czechAudio === 'no' && hasCzech) return false;
+        }
+
+        // Filter by Czech subtitles
+        if (czechSubs) {
+            const subLangs = meta.subtitle_languages || [];
+            const hasCzech = subLangs.some(lang =>
+                lang && (lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz' || lang.toLowerCase() === 'ces')
+            );
+            if (czechSubs === 'yes' && !hasCzech) return false;
+            if (czechSubs === 'no' && hasCzech) return false;
+        }
+
+        // Filter by codec
+        if (codec && meta.video_codec) {
+            const metaCodec = meta.video_codec.toUpperCase();
+            if (codec === 'H.264' && !metaCodec.includes('H.264') && !metaCodec.includes('X264')) {
+                return false;
+            }
+            if (codec === 'HEVC' && !metaCodec.includes('HEVC') && !metaCodec.includes('H.265')) {
+                return false;
+            }
+        }
+
+        return true;
+    });
+
+    renderEpisodes(filteredEpisodes);
+}
+
+// Render episodes table
+function renderEpisodes(episodes) {
+    const list = document.getElementById('episodes-list');
+    list.innerHTML = '';
+
+    // Sort by episode number
+    episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+
+    episodes.forEach(episode => {
+        const meta = episode.fileMetadata || {};
+        const episodeNum = `S${String(episode.seasonNumber).padStart(2, '0')}E${String(episode.episodeNumber).padStart(2, '0')}`;
+
+        const row = document.createElement('tr');
+        row.className = getUpgradeClass(episode);
+
+        // Episode number
+        const cellNum = document.createElement('td');
+        cellNum.style.fontWeight = 'bold';
+        cellNum.style.color = '#4CAF50';
+        cellNum.textContent = episodeNum;
+        row.appendChild(cellNum);
+
+        // Episode title
+        const cellTitle = document.createElement('td');
+        cellTitle.textContent = episode.title || 'Unknown';
+        row.appendChild(cellTitle);
+
+        // Resolution
+        const cellResolution = document.createElement('td');
+        const resolution = meta.resolution || 'Unknown';
+        cellResolution.innerHTML = `<span style="margin-right: 5px;">🎬</span><span class="badge badge-resolution">${resolution}</span>`;
+        row.appendChild(cellResolution);
+
+        // Codec
+        const cellCodec = document.createElement('td');
+        const codec = meta.video_codec || 'Unknown';
+        const isHEVC = codec.toUpperCase().includes('HEVC') || codec.toUpperCase().includes('H.265');
+        const codecClass = isHEVC ? 'badge-codec-warning' : 'badge-codec';
+        const codecIcon = isHEVC ? '⚠️' : '🎥';
+        cellCodec.innerHTML = `<span style="margin-right: 5px;">${codecIcon}</span><span class="badge ${codecClass}">${codec}</span>`;
+        row.appendChild(cellCodec);
+
+        // Audio languages
+        const cellAudio = document.createElement('td');
+        const audioLangs = meta.audio_languages || [];
+        const hasCzechAudio = audioLangs.some(lang => lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz');
+        let audioHTML = '<span style="margin-right: 5px;">🔊</span>';
+        if (audioLangs.length > 0) {
+            audioLangs.forEach(lang => {
+                const isCzech = lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz';
+                const badge = isCzech ? 'badge-language' : 'badge-codec';
+                audioHTML += `<span class="badge ${badge}">${lang}</span>`;
+            });
+        } else {
+            audioHTML += '<span style="color: #666;">N/A</span>';
+        }
+        if (!hasCzechAudio && audioLangs.length > 0) {
+            audioHTML = '<span style="color: #f44336;">⚠️ No CS</span>';
+        }
+        cellAudio.innerHTML = audioHTML;
+        row.appendChild(cellAudio);
+
+        // Subtitle languages
+        const cellSubtitles = document.createElement('td');
+        const subtitleLangs = meta.subtitle_languages || [];
+        const hasCzechSubs = subtitleLangs.some(lang => lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz');
+        let subsHTML = '<span style="margin-right: 5px;">📝</span>';
+        if (subtitleLangs.length > 0) {
+            subtitleLangs.forEach(lang => {
+                const isCzech = lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz';
+                const badge = isCzech ? 'badge-language' : 'badge-codec';
+                subsHTML += `<span class="badge ${badge}">${lang}</span>`;
+            });
+        } else {
+            subsHTML += '<span style="color: #666;">N/A</span>';
+        }
+        if (!hasCzechSubs && subtitleLangs.length > 0) {
+            subsHTML = '<span style="color: #f44336;">⚠️ No CS</span>';
+        }
+        cellSubtitles.innerHTML = subsHTML;
+        row.appendChild(cellSubtitles);
+
+        // Source
+        const cellSource = document.createElement('td');
+        const source = meta.source_type || 'Unknown';
+        cellSource.innerHTML = `<span style="margin-right: 5px;">📦</span><span class="badge badge-source">${source}</span>`;
+        row.appendChild(cellSource);
+
+        // File size
+        const cellSize = document.createElement('td');
+        const size = meta.size || 0;
+        cellSize.innerHTML = `<span style="margin-right: 5px;">💾</span>${formatFileSize(size)}`;
+        row.appendChild(cellSize);
+
+        // Action button
+        const cellAction = document.createElement('td');
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.innerHTML = 'Find Better Version';
+        btn.onclick = (event) => searchUpgrade(event, episode, meta);
+        cellAction.appendChild(btn);
+        row.appendChild(cellAction);
+
+        list.appendChild(row);
+    });
+}
+
+// Search for better version
+async function searchUpgrade(event, episode, meta) {
+    const episodeNum = `S${String(episode.seasonNumber).padStart(2, '0')}E${String(episode.episodeNumber).padStart(2, '0')}`;
+    const button = event.target;
+
+    // Show modal
+    const modal = document.getElementById('search-modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalLoading = document.getElementById('modal-loading');
+    const modalResults = document.getElementById('modal-results');
+
+    modalTitle.textContent = `Upgrade Search - ${episodeNum}`;
+    modalLoading.style.display = 'block';
+    modalResults.innerHTML = '';
+    modal.style.display = 'block';
+
+    try {
+        const response = await fetch('/api/search-upgrade', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                source: 'sonarr',
+                series_id: seriesId,
+                season: episode.seasonNumber,
+                episode: episode.episodeNumber,
+                episode_file_id: meta.episodeFileId
+            })
+        });
+
+        const data = await response.json();
+        modalLoading.style.display = 'none';
+
+        if (data.success && data.results_count > 0) {
+            renderUpgradeResults(data.results, data.pending_id, data.upgrade_metadata);
+        } else {
+            modalResults.innerHTML = '<p style="text-align: center; color: #999;">No better versions found on Webshare.</p>';
+        }
+    } catch (error) {
+        modalLoading.style.display = 'none';
+        modalResults.innerHTML = `<p style="text-align: center; color: #f44336;">Error: ${error.message}</p>`;
+    }
+}
+
+function renderUpgradeResults(results, pendingId, upgradeMetadata) {
+    const modalResults = document.getElementById('modal-results');
+    modalResults.innerHTML = '';
+
+    results.forEach((result, index) => {
+        const card = document.createElement('div');
+        card.className = 'result-card';
+
+        const parsed = result.parsed || {};
+        const score = result.score || {};
+
+        card.innerHTML = `
+            <div class="result-title">${result.name}</div>
+            <div class="result-meta">
+                ${parsed.quality ? `<span class="badge badge-quality">${parsed.quality}</span>` : ''}
+                ${parsed.has_czech ? `<span class="badge badge-czech">CZ</span>` : ''}
+                ${parsed.language ? `<span class="badge badge-lang">${parsed.language}</span>` : ''}
+                ${parsed.source ? `<span class="badge badge-lang">${parsed.source}</span>` : ''}
+                ${result.file_size_gb ? `<span class="badge badge-size">${result.file_size_gb.toFixed(2)} GB</span>` : ''}
+                ${score.total !== undefined ? `<span class="badge badge-score">Score: ${score.total}</span>` : ''}
+            </div>
+            <button class="btn" onclick="downloadUpgrade(${pendingId}, ${index}, ${JSON.stringify(upgradeMetadata).replace(/"/g, '&quot;')})">Download This Upgrade</button>
+        `;
+
+        modalResults.appendChild(card);
+    });
+}
+
+async function downloadUpgrade(pendingId, resultIndex, upgradeMetadata) {
+    try {
+        // Disable all buttons
+        document.querySelectorAll('.modal .btn').forEach(btn => {
+            btn.disabled = true;
+            btn.textContent = 'Downloading...';
+        });
+
+        const response = await fetch('/api/confirm', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                pending_id: pendingId,
+                result_index: resultIndex,
+                upgrade_metadata: upgradeMetadata
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            // Close modal
+            document.getElementById('search-modal').style.display = 'none';
+
+            // Show success message
+            showToast(`Upgrade sent to pyLoad (Package ID: ${data.package_id})`);
+
+            // Reload episodes to update UI
+            await loadEpisodes();
+        } else {
+            showToast(`Error: ${data.error || 'Failed to download'}`, 'error');
+            // Re-enable buttons
+            document.querySelectorAll('.modal .btn').forEach(btn => {
+                btn.disabled = false;
+                btn.textContent = 'Download This Upgrade';
+            });
+        }
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+        // Re-enable buttons
+        document.querySelectorAll('.modal .btn').forEach(btn => {
+            btn.disabled = false;
+            btn.textContent = 'Download This Upgrade';
+        });
+    }
+}
+
+// Modal close button
+document.querySelector('.close').onclick = function() {
+    document.getElementById('search-modal').style.display = 'none';
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const modal = document.getElementById('search-modal');
+    if (event.target == modal) {
+        modal.style.display = 'none';
+    }
+}
+
+// Load episodes on page load
+window.addEventListener('DOMContentLoaded', () => {
+    loadEpisodes();
+
+    // Attach filter event listeners
+    document.getElementById('searchEpisodes').addEventListener('input', filterEpisodes);
+    document.getElementById('filterResolution').addEventListener('change', filterEpisodes);
+    document.getElementById('filterCzechAudio').addEventListener('change', filterEpisodes);
+    document.getElementById('filterCzechSubs').addEventListener('change', filterEpisodes);
+    document.getElementById('filterCodec').addEventListener('change', filterEpisodes);
+});
+</script>
+{% endblock %}

@@ -1,0 +1,466 @@
+{% extends "base.html" %}
+
+{% block title %}Pending Upgrades - Webshare Downloader{% endblock %}
+
+{% block content %}
+<style>
+    .tabs {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 30px;
+        border-bottom: 2px solid #3a3a3a;
+    }
+    .tab {
+        padding: 12px 24px;
+        background: transparent;
+        border: none;
+        color: #888;
+        cursor: pointer;
+        font-size: 1em;
+        font-weight: 500;
+        border-bottom: 3px solid transparent;
+        margin-bottom: -2px;
+        transition: all 0.2s;
+    }
+    .tab:hover {
+        color: #aaa;
+    }
+    .tab.active {
+        color: #4a9eff;
+        border-bottom-color: #4a9eff;
+    }
+    .tab-content {
+        display: none;
+    }
+    .tab-content.active {
+        display: block;
+    }
+    .upgrade-card {
+        background: #2a2a2a;
+        border-radius: 8px;
+        margin-bottom: 30px;
+        overflow: hidden;
+        border: 1px solid #3a3a3a;
+    }
+    .upgrade-header {
+        padding: 20px;
+        border-bottom: 2px solid #3a3a3a;
+        background: #1f1f1f;
+    }
+    .upgrade-title {
+        font-size: 1.3em;
+        font-weight: bold;
+        color: #fff;
+        margin: 0;
+    }
+    .comparison-container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0;
+    }
+    .version-panel {
+        padding: 20px;
+    }
+    .version-panel.current {
+        border-right: 2px solid #3a3a3a;
+        text-align: right;
+    }
+    .version-panel.current .version-header,
+    .version-panel.current .file-name {
+        text-align: left;
+    }
+    .version-header {
+        font-size: 0.95em;
+        font-weight: 600;
+        color: #888;
+        text-transform: uppercase;
+        margin-bottom: 15px;
+        letter-spacing: 0.5px;
+    }
+    .file-name {
+        font-family: 'Courier New', monospace;
+        font-size: 0.85em;
+        color: #aaa;
+        word-break: break-all;
+        margin-bottom: 20px;
+        padding: 10px;
+        background: #1f1f1f;
+        border-radius: 4px;
+    }
+    .attributes {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    .attribute {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.95em;
+    }
+    .attribute-icon {
+        width: 24px;
+        text-align: center;
+    }
+    .attribute-value {
+        color: #ccc;
+    }
+    .attribute-value.improved {
+        color: #4caf50;
+        font-weight: 600;
+    }
+    .checkmark {
+        color: #4caf50;
+        font-weight: bold;
+        margin-left: 4px;
+    }
+    .upgrade-footer {
+        padding: 20px;
+        border-top: 2px solid #3a3a3a;
+        background: #1f1f1f;
+    }
+    .decision-label {
+        font-size: 0.95em;
+        font-weight: 600;
+        color: #888;
+        margin-bottom: 12px;
+    }
+    .decision-buttons {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 0.95em;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+    .btn-primary {
+        background: #4a9eff;
+        color: #fff;
+    }
+    .btn-primary:hover {
+        background: #6ab0ff;
+    }
+    .btn-secondary {
+        background: #666;
+        color: #fff;
+    }
+    .btn-secondary:hover {
+        background: #777;
+    }
+    .btn-info {
+        background: #9c27b0;
+        color: #fff;
+    }
+    .btn-info:hover {
+        background: #ab47bc;
+    }
+    .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+    .loading {
+        text-align: center;
+        padding: 40px;
+        color: #888;
+    }
+    .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: #666;
+    }
+    .empty-state h3 {
+        margin-bottom: 10px;
+        color: #888;
+    }
+    @media (max-width: 768px) {
+        .comparison-container {
+            grid-template-columns: 1fr;
+        }
+        .version-panel.current {
+            border-right: none;
+            border-bottom: 2px solid #3a3a3a;
+        }
+    }
+</style>
+
+<h1>Pending Upgrades</h1>
+
+<div class="tabs">
+    <button class="tab active" data-tab="series">Series</button>
+    <button class="tab" data-tab="movies">Movies</button>
+</div>
+
+<div id="series-content" class="tab-content active">
+    <div class="loading">Loading series...</div>
+</div>
+
+<div id="movies-content" class="tab-content">
+    <div class="loading">Loading movies...</div>
+</div>
+
+<script>
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const targetTab = tab.dataset.tab;
+
+            // Update active tab
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+
+            // Update active content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`${targetTab}-content`).classList.add('active');
+        });
+    });
+
+    // Format file size
+    function formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+    }
+
+    // Add Czech flag to language strings
+    function markCzechLanguage(langString) {
+        if (!langString || langString === 'N/A') return langString;
+        return langString.replace(/\b(cs|cz)\b/gi, match => `${match} 🇨🇿`);
+    }
+
+    // Format attribute with improvement check
+    function formatAttribute(icon, label, currentValue, newValue) {
+        const isImproved = newValue && newValue !== currentValue && isValueBetter(label, currentValue, newValue);
+        const newClass = isImproved ? 'attribute-value improved' : 'attribute-value';
+        const checkmark = isImproved ? ' <span class="checkmark">✓</span>' : '';
+
+        // Add Czech flag emoji for audio and subtitles
+        let displayCurrentValue = currentValue || 'N/A';
+        let displayNewValue = newValue || 'N/A';
+        if (label === 'audio' || label === 'subtitles') {
+            displayCurrentValue = markCzechLanguage(displayCurrentValue);
+            displayNewValue = markCzechLanguage(displayNewValue);
+        }
+
+        return {
+            current: `<div class="attribute"><span class="attribute-icon">${icon}</span><span class="attribute-value">${displayCurrentValue}</span></div>`,
+            new: `<div class="attribute"><span class="attribute-icon">${icon}</span><span class="${newClass}">${displayNewValue}${checkmark}</span></div>`
+        };
+    }
+
+    // Check if new value is better
+    function isValueBetter(label, current, newVal) {
+        if (!current || !newVal) return false;
+
+        // Resolution check (higher is better)
+        if (label === 'resolution') {
+            const resOrder = {'480p': 1, '720p': 2, '1080p': 3, '2160p': 4};
+            return (resOrder[newVal] || 0) > (resOrder[current] || 0);
+        }
+
+        // Source check (Blu-ray > WEB-DL > HDTV, etc.)
+        if (label === 'source') {
+            const sourceOrder = {'HDTV': 1, 'WEB-DL': 2, 'WEBRip': 2, 'BluRay': 3, 'Blu-ray': 3};
+            return (sourceOrder[newVal] || 0) > (sourceOrder[current] || 0);
+        }
+
+        // Audio/subtitles check (Czech language presence is better, then more languages)
+        if (label === 'audio' || label === 'subtitles') {
+            const currentHasCs = /\b(cs|cz)\b/i.test(current);
+            const newHasCs = /\b(cs|cz)\b/i.test(newVal);
+            // If new has Czech and old doesn't, it's better
+            if (newHasCs && !currentHasCs) return true;
+            // If both have or both don't have Czech, more languages is better
+            if (newHasCs === currentHasCs) {
+                const currentCount = current.split(',').length;
+                const newCount = newVal.split(',').length;
+                return newCount > currentCount;
+            }
+        }
+
+        return false;
+    }
+
+    // Render upgrade card
+    function renderUpgradeCard(upgrade, type) {
+        const current = upgrade.current;
+        const new_file = upgrade.new;
+
+        // Extract attributes with null checks
+        const currentAttrs = {
+            resolution: (current && current.quality) || 'N/A',
+            codec: (current && current.codec) || 'N/A',
+            audio: (current && current.audio_languages && current.audio_languages.join(', ')) || 'N/A',
+            subtitles: (current && current.subtitles && current.subtitles.join(', ')) || 'N/A',
+            source: (current && current.source) || 'N/A',
+            size: (current && current.size) ? formatSize(current.size) : 'N/A'
+        };
+
+        const newAttrs = {
+            resolution: (new_file && new_file.quality) || 'N/A',
+            codec: (new_file && new_file.codec) || 'N/A',
+            audio: (new_file && new_file.audio_languages && new_file.audio_languages.join(', ')) || 'N/A',
+            subtitles: (new_file && new_file.subtitles && new_file.subtitles.join(', ')) || 'N/A',
+            source: (new_file && new_file.source) || 'N/A',
+            size: (new_file && new_file.size) ? formatSize(new_file.size) : 'N/A'
+        };
+
+        const resolution = formatAttribute('🎬', 'resolution', currentAttrs.resolution, newAttrs.resolution);
+        const codec = formatAttribute('🎥', 'codec', currentAttrs.codec, newAttrs.codec);
+        const audio = formatAttribute('🔊', 'audio', currentAttrs.audio, newAttrs.audio);
+        const subtitles = formatAttribute('📝', 'subtitles', currentAttrs.subtitles, newAttrs.subtitles);
+        const source = formatAttribute('📦', 'source', currentAttrs.source, newAttrs.source);
+        const size = formatAttribute('💾', 'size', currentAttrs.size, newAttrs.size);
+
+        return `
+            <div class="upgrade-card" data-upgrade-id="${upgrade.id}">
+                <div class="upgrade-header">
+                    <h3 class="upgrade-title">${upgrade.title}</h3>
+                </div>
+                <div class="comparison-container">
+                    <div class="version-panel current">
+                        <div class="version-header">CURRENT VERSION (in ${type === 'series' ? 'Sonarr' : 'Radarr'})</div>
+                        <div class="file-name">${(current && (current.file_path || current.filename)) || 'N/A'}</div>
+                        <div class="attributes">
+                            ${resolution.current}
+                            ${codec.current}
+                            ${audio.current}
+                            ${subtitles.current}
+                            ${source.current}
+                            ${size.current}
+                        </div>
+                    </div>
+                    <div class="version-panel new">
+                        <div class="version-header">NEW VERSION (downloaded)</div>
+                        <div class="file-name">${(new_file && (new_file.file_path || new_file.filename)) || 'N/A'}</div>
+                        <div class="attributes">
+                            ${resolution.new}
+                            ${codec.new}
+                            ${audio.new}
+                            ${subtitles.new}
+                            ${source.new}
+                            ${size.new}
+                        </div>
+                    </div>
+                </div>
+                <div class="upgrade-footer">
+                    <div class="decision-label">Decision:</div>
+                    <div class="decision-buttons">
+                        <button class="btn btn-secondary" onclick="confirmUpgrade('${upgrade.id}', 'keep_old', '${type}')">
+                            Keep Old
+                        </button>
+                        <button class="btn btn-info" onclick="confirmUpgrade('${upgrade.id}', 'keep_both', '${type}')">
+                            Keep Both
+                        </button>
+                        <button class="btn btn-primary" onclick="confirmUpgrade('${upgrade.id}', 'use_new', '${type}')">
+                            Use New
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Load upgrades
+    async function loadUpgrades(type) {
+        const container = document.getElementById(`${type}-content`);
+        container.innerHTML = '<div class="loading">Loading...</div>';
+
+        try {
+            const response = await fetch(`/api/pending-upgrades/${type}`);
+
+            if (!response.ok) {
+                throw new Error(`Server error: ${response.status} ${response.statusText}`);
+            }
+
+            const data = await response.json();
+
+            if (data.error) {
+                throw new Error(data.error);
+            }
+
+            if (!data.upgrades || data.upgrades.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h3>No Pending Upgrades</h3>
+                        <p>There are currently no upgrades available for ${type === 'series' ? 'series' : 'movies'}.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = data.upgrades.map(upgrade => renderUpgradeCard(upgrade, type)).join('');
+        } catch (error) {
+            console.error(`Error loading ${type} upgrades:`, error);
+            container.innerHTML = `
+                <div class="alert alert-error">
+                    Error loading upgrades: ${error.message}
+                </div>
+            `;
+        }
+    }
+
+    // Confirm upgrade decision
+    async function confirmUpgrade(upgradeId, action, type) {
+        const card = document.querySelector(`[data-upgrade-id="${upgradeId}"]`);
+        const buttons = card.querySelectorAll('.btn');
+
+        // Disable buttons
+        buttons.forEach(btn => btn.disabled = true);
+
+        try {
+            const response = await fetch('/api/confirm-upgrade', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    upgrade_id: upgradeId,
+                    action: action,
+                    type: type
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.status === 'success') {
+                // Remove card with fade out effect
+                card.style.transition = 'opacity 0.3s';
+                card.style.opacity = '0';
+                setTimeout(() => {
+                    card.remove();
+
+                    // Check if there are any remaining upgrades
+                    const container = document.getElementById(`${type}-content`);
+                    if (!container.querySelector('.upgrade-card')) {
+                        container.innerHTML = `
+                            <div class="empty-state">
+                                <h3>No Pending Upgrades</h3>
+                                <p>There are currently no upgrades available for ${type === 'series' ? 'series' : 'movies'}.</p>
+                            </div>
+                        `;
+                    }
+                }, 300);
+            } else {
+                throw new Error(result.message || 'Unknown error');
+            }
+        } catch (error) {
+            alert(`Error confirming upgrade: ${error.message}`);
+            buttons.forEach(btn => btn.disabled = false);
+        }
+    }
+
+    // Load initial data
+    loadUpgrades('series');
+    loadUpgrades('movies');
+</script>
+{% endblock %}

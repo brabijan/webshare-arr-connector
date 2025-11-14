@@ -1,0 +1,605 @@
+{% extends "base.html" %}
+
+{% block title %}Library - Webshare Downloader{% endblock %}
+
+{% block content %}
+<h1>Library</h1>
+
+<!-- Tab Navigation -->
+<div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('series')">Series</button>
+    <button class="tab-btn" onclick="switchTab('movies')">Movies</button>
+</div>
+
+<!-- Loading indicator -->
+<div id="loading" style="display: none; text-align: center; padding: 40px;">
+    <p>Loading...</p>
+</div>
+
+<!-- Series Tab Content -->
+<div id="series-content" class="tab-content active">
+    <!-- Search & Filters for Series -->
+    <div class="filters-section">
+        <div class="filter-row">
+            <input type="text" id="searchSeries" class="form-control" placeholder="Search by title...">
+            <select id="filterSeriesResolution" class="form-control">
+                <option value="">All Resolutions</option>
+                <option value="2160p">2160p / 4K</option>
+                <option value="1080p">1080p</option>
+                <option value="720p">720p</option>
+            </select>
+            <select id="filterSeriesCzechAudio" class="form-control">
+                <option value="">Any Audio</option>
+                <option value="yes">Has Czech Audio</option>
+                <option value="no">No Czech Audio</option>
+            </select>
+            <select id="filterSeriesCzechSubs" class="form-control">
+                <option value="">Any Subtitles</option>
+                <option value="yes">Has Czech Subs</option>
+                <option value="no">No Czech Subs</option>
+            </select>
+            <select id="filterSeriesCodec" class="form-control">
+                <option value="">Any Codec</option>
+                <option value="H.264">H.264 / x264</option>
+                <option value="HEVC">HEVC / H.265</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="series-grid" class="media-grid"></div>
+    <div id="no-series" style="display: none;" class="empty-state">
+        <h3>No series in library</h3>
+        <p>Your library is empty. Add some series to get started!</p>
+    </div>
+</div>
+
+<!-- Movies Tab Content -->
+<div id="movies-content" class="tab-content">
+    <!-- Search & Filters for Movies -->
+    <div class="filters-section">
+        <div class="filter-row">
+            <input type="text" id="searchMovies" class="form-control" placeholder="Search by title...">
+            <select id="filterMoviesResolution" class="form-control">
+                <option value="">All Resolutions</option>
+                <option value="2160p">2160p / 4K</option>
+                <option value="1080p">1080p</option>
+                <option value="720p">720p</option>
+            </select>
+            <select id="filterMoviesCzechAudio" class="form-control">
+                <option value="">Any Audio</option>
+                <option value="yes">Has Czech Audio</option>
+                <option value="no">No Czech Audio</option>
+            </select>
+            <select id="filterMoviesCzechSubs" class="form-control">
+                <option value="">Any Subtitles</option>
+                <option value="yes">Has Czech Subs</option>
+                <option value="no">No Czech Subs</option>
+            </select>
+            <select id="filterMoviesCodec" class="form-control">
+                <option value="">Any Codec</option>
+                <option value="H.264">H.264 / x264</option>
+                <option value="HEVC">HEVC / H.265</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="movies-grid" class="media-grid"></div>
+    <div id="no-movies" style="display: none;" class="empty-state">
+        <h3>No movies in library</h3>
+        <p>Your library is empty. Add some movies to get started!</p>
+    </div>
+</div>
+
+<style>
+/* Filters Section */
+.filters-section {
+    margin-bottom: 25px;
+}
+
+.filter-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+    gap: 12px;
+    align-items: center;
+}
+
+.form-control {
+    width: 100%;
+    padding: 10px 14px;
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #4CAF50;
+    background: #2f2f2f;
+}
+
+.form-control::placeholder {
+    color: #666;
+}
+
+/* Upgrade Badge Colors */
+.upgrade-candidate-missing-audio {
+    border: 2px solid #f44336;
+}
+
+.upgrade-candidate-no-czech-audio {
+    border: 2px solid #f44336;
+}
+
+.upgrade-candidate-subs-only {
+    border: 2px solid #FFC107;
+}
+
+.upgrade-candidate-low-res {
+    border: 2px solid #2196F3;
+}
+
+/* Tab Navigation */
+.tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 30px;
+    border-bottom: 2px solid #333;
+}
+
+.tab-btn {
+    padding: 12px 24px;
+    background: transparent;
+    border: none;
+    color: #999;
+    font-size: 16px;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: all 0.3s;
+}
+
+.tab-btn:hover {
+    color: #fff;
+}
+
+.tab-btn.active {
+    color: #4CAF50;
+    border-bottom-color: #4CAF50;
+}
+
+/* Tab Content */
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* Media Grid */
+.media-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.media-card {
+    background: #1a1a1a;
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    position: relative;
+}
+
+.media-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+}
+
+.media-poster {
+    width: 100%;
+    height: 270px;
+    object-fit: cover;
+    background: #2a2a2a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+    font-size: 14px;
+}
+
+.media-poster img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.media-info {
+    padding: 12px;
+}
+
+.media-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.media-year {
+    font-size: 12px;
+    color: #999;
+    margin-bottom: 8px;
+}
+
+.media-badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: #4a9eff;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #888;
+}
+
+.empty-state h3 {
+    margin-bottom: 10px;
+}
+</style>
+
+<script>
+let currentTab = 'series';
+let seriesData = [];
+let moviesData = [];
+let filteredSeriesData = [];
+let filteredMoviesData = [];
+
+// Switch tabs
+function switchTab(tab) {
+    currentTab = tab;
+
+    // Update tab buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+
+    // Update tab content
+    document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+    if (tab === 'series') {
+        document.getElementById('series-content').classList.add('active');
+        if (seriesData.length === 0) {
+            loadSeries();
+        }
+    } else {
+        document.getElementById('movies-content').classList.add('active');
+        if (moviesData.length === 0) {
+            loadMovies();
+        }
+    }
+}
+
+// Load series from library
+async function loadSeries() {
+    const loading = document.getElementById('loading');
+    const grid = document.getElementById('series-grid');
+    const noSeries = document.getElementById('no-series');
+
+    loading.style.display = 'block';
+    grid.innerHTML = '';
+    noSeries.style.display = 'none';
+
+    try {
+        const response = await fetch('/api/library/series');
+        const data = await response.json();
+
+        loading.style.display = 'none';
+
+        if (data.success && data.series && data.series.length > 0) {
+            seriesData = data.series;
+            filteredSeriesData = data.series;
+            renderSeries(data.series);
+        } else {
+            noSeries.style.display = 'block';
+        }
+    } catch (error) {
+        loading.style.display = 'none';
+        console.error('Error loading series:', error);
+        alert(`Error loading series: ${error.message}`);
+    }
+}
+
+// Check if item needs upgrade based on fileMetadata
+function getUpgradeClass(item) {
+    const meta = item.fileMetadata || item;
+
+    // Check for Czech audio
+    const audioLangs = meta.audio_languages || [];
+    const hasCzechAudio = audioLangs.some(lang =>
+        lang && (lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz' || lang.toLowerCase() === 'ces')
+    );
+
+    // Check for Czech subtitles
+    const subLangs = meta.subtitle_languages || [];
+    const hasCzechSubs = subLangs.some(lang =>
+        lang && (lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz' || lang.toLowerCase() === 'ces')
+    );
+
+    // Check resolution
+    const resolution = meta.resolution || '';
+    const resolutionValue = parseInt(resolution) || 0;
+
+    // Priority: Missing CZ audio > Only CZ subs > Low resolution
+    if (audioLangs.length > 0 && !hasCzechAudio) {
+        return 'upgrade-candidate-no-czech-audio';
+    }
+    if (!hasCzechAudio && hasCzechSubs) {
+        return 'upgrade-candidate-subs-only';
+    }
+    if (resolutionValue < 1080) {
+        return 'upgrade-candidate-low-res';
+    }
+
+    return '';
+}
+
+// Filter series based on search and filters
+function filterSeries() {
+    const searchText = document.getElementById('searchSeries').value.toLowerCase();
+    const resolution = document.getElementById('filterSeriesResolution').value;
+    const czechAudio = document.getElementById('filterSeriesCzechAudio').value;
+    const czechSubs = document.getElementById('filterSeriesCzechSubs').value;
+    const codec = document.getElementById('filterSeriesCodec').value;
+
+    filteredSeriesData = seriesData.filter(s => {
+        // Search by title
+        if (searchText && !s.title.toLowerCase().includes(searchText)) {
+            return false;
+        }
+
+        // Check fileMetadata if available
+        const meta = s.fileMetadata || {};
+
+        // Filter by resolution
+        if (resolution && meta.resolution !== resolution) {
+            return false;
+        }
+
+        // Filter by Czech audio
+        if (czechAudio) {
+            const audioLangs = meta.audio_languages || [];
+            const hasCzech = audioLangs.some(lang =>
+                lang && (lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz' || lang.toLowerCase() === 'ces')
+            );
+            if (czechAudio === 'yes' && !hasCzech) return false;
+            if (czechAudio === 'no' && hasCzech) return false;
+        }
+
+        // Filter by Czech subtitles
+        if (czechSubs) {
+            const subLangs = meta.subtitle_languages || [];
+            const hasCzech = subLangs.some(lang =>
+                lang && (lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz' || lang.toLowerCase() === 'ces')
+            );
+            if (czechSubs === 'yes' && !hasCzech) return false;
+            if (czechSubs === 'no' && hasCzech) return false;
+        }
+
+        // Filter by codec
+        if (codec && meta.video_codec) {
+            const metaCodec = meta.video_codec.toUpperCase();
+            if (codec === 'H.264' && !metaCodec.includes('H.264') && !metaCodec.includes('X264')) {
+                return false;
+            }
+            if (codec === 'HEVC' && !metaCodec.includes('HEVC') && !metaCodec.includes('H.265')) {
+                return false;
+            }
+        }
+
+        return true;
+    });
+
+    renderSeries(filteredSeriesData);
+}
+
+// Render series grid
+function renderSeries(series) {
+    const grid = document.getElementById('series-grid');
+    const noSeries = document.getElementById('no-series');
+    grid.innerHTML = '';
+
+    if (series.length === 0) {
+        noSeries.style.display = 'block';
+        grid.style.display = 'none';
+        return;
+    }
+
+    noSeries.style.display = 'none';
+    grid.style.display = 'grid';
+
+    series.forEach(s => {
+        const card = document.createElement('div');
+        card.className = 'media-card ' + getUpgradeClass(s);
+        card.onclick = () => window.location.href = `/library/series/${s.id}/seasons`;
+
+        const posterHtml = s.poster_url
+            ? `<img src="${s.poster_url}" alt="${s.title}" onerror="this.style.display='none';this.parentElement.innerHTML='No Image'"/>`
+            : 'No Image';
+
+        const fileCount = s.file_count || 0;
+        const badgeText = `${fileCount} ${fileCount === 1 ? 'file' : 'files'}`;
+
+        card.innerHTML = `
+            <div class="media-poster">${posterHtml}</div>
+            <div class="media-info">
+                <div class="media-title" title="${s.title}">${s.title}</div>
+                <div class="media-year">${s.year || 'Unknown'}</div>
+            </div>
+            <div class="media-badge">${badgeText}</div>
+        `;
+
+        grid.appendChild(card);
+    });
+}
+
+// Load movies from library
+async function loadMovies() {
+    const loading = document.getElementById('loading');
+    const grid = document.getElementById('movies-grid');
+    const noMovies = document.getElementById('no-movies');
+
+    loading.style.display = 'block';
+    grid.innerHTML = '';
+    noMovies.style.display = 'none';
+
+    try {
+        const response = await fetch('/api/library/movies');
+        const data = await response.json();
+
+        loading.style.display = 'none';
+
+        if (data.success && data.movies && data.movies.length > 0) {
+            moviesData = data.movies;
+            filteredMoviesData = data.movies;
+            renderMovies(data.movies);
+        } else {
+            noMovies.style.display = 'block';
+        }
+    } catch (error) {
+        loading.style.display = 'none';
+        console.error('Error loading movies:', error);
+        alert(`Error loading movies: ${error.message}`);
+    }
+}
+
+// Filter movies based on search and filters
+function filterMovies() {
+    const searchText = document.getElementById('searchMovies').value.toLowerCase();
+    const resolution = document.getElementById('filterMoviesResolution').value;
+    const czechAudio = document.getElementById('filterMoviesCzechAudio').value;
+    const czechSubs = document.getElementById('filterMoviesCzechSubs').value;
+    const codec = document.getElementById('filterMoviesCodec').value;
+
+    filteredMoviesData = moviesData.filter(m => {
+        // Search by title
+        if (searchText && !m.title.toLowerCase().includes(searchText)) {
+            return false;
+        }
+
+        // Check fileMetadata if available
+        const meta = m.fileMetadata || m;
+
+        // Filter by resolution
+        if (resolution && meta.resolution !== resolution) {
+            return false;
+        }
+
+        // Filter by Czech audio
+        if (czechAudio) {
+            const audioLangs = meta.audio_languages || [];
+            const hasCzech = audioLangs.some(lang =>
+                lang && (lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz' || lang.toLowerCase() === 'ces')
+            );
+            if (czechAudio === 'yes' && !hasCzech) return false;
+            if (czechAudio === 'no' && hasCzech) return false;
+        }
+
+        // Filter by Czech subtitles
+        if (czechSubs) {
+            const subLangs = meta.subtitle_languages || [];
+            const hasCzech = subLangs.some(lang =>
+                lang && (lang.toLowerCase() === 'cs' || lang.toLowerCase() === 'cz' || lang.toLowerCase() === 'ces')
+            );
+            if (czechSubs === 'yes' && !hasCzech) return false;
+            if (czechSubs === 'no' && hasCzech) return false;
+        }
+
+        // Filter by codec
+        if (codec && meta.video_codec) {
+            const metaCodec = meta.video_codec.toUpperCase();
+            if (codec === 'H.264' && !metaCodec.includes('H.264') && !metaCodec.includes('X264')) {
+                return false;
+            }
+            if (codec === 'HEVC' && !metaCodec.includes('HEVC') && !metaCodec.includes('H.265')) {
+                return false;
+            }
+        }
+
+        return true;
+    });
+
+    renderMovies(filteredMoviesData);
+}
+
+// Render movies grid
+function renderMovies(movies) {
+    const grid = document.getElementById('movies-grid');
+    const noMovies = document.getElementById('no-movies');
+    grid.innerHTML = '';
+
+    if (movies.length === 0) {
+        noMovies.style.display = 'block';
+        grid.style.display = 'none';
+        return;
+    }
+
+    noMovies.style.display = 'none';
+    grid.style.display = 'grid';
+
+    movies.forEach(m => {
+        const card = document.createElement('div');
+        card.className = 'media-card ' + getUpgradeClass(m);
+        card.onclick = () => window.location.href = `/library/movies/${m.id}`;
+
+        const posterHtml = m.poster_url
+            ? `<img src="${m.poster_url}" alt="${m.title}" onerror="this.style.display='none';this.parentElement.innerHTML='No Image'"/>`
+            : 'No Image';
+
+        const fileCount = m.file_count || 0;
+        const badgeText = `${fileCount} ${fileCount === 1 ? 'file' : 'files'}`;
+
+        card.innerHTML = `
+            <div class="media-poster">${posterHtml}</div>
+            <div class="media-info">
+                <div class="media-title" title="${m.title}">${m.title}</div>
+                <div class="media-year">${m.year || 'Unknown'}</div>
+            </div>
+            <div class="media-badge">${badgeText}</div>
+        `;
+
+        grid.appendChild(card);
+    });
+}
+
+// Load series on page load
+window.addEventListener('DOMContentLoaded', () => {
+    loadSeries();
+
+    // Attach filter event listeners for series
+    document.getElementById('searchSeries').addEventListener('input', filterSeries);
+    document.getElementById('filterSeriesResolution').addEventListener('change', filterSeries);
+    document.getElementById('filterSeriesCzechAudio').addEventListener('change', filterSeries);
+    document.getElementById('filterSeriesCzechSubs').addEventListener('change', filterSeries);
+    document.getElementById('filterSeriesCodec').addEventListener('change', filterSeries);
+
+    // Attach filter event listeners for movies
+    document.getElementById('searchMovies').addEventListener('input', filterMovies);
+    document.getElementById('filterMoviesResolution').addEventListener('change', filterMovies);
+    document.getElementById('filterMoviesCzechAudio').addEventListener('change', filterMovies);
+    document.getElementById('filterMoviesCzechSubs').addEventListener('change', filterMovies);
+    document.getElementById('filterMoviesCodec').addEventListener('change', filterMovies);
+});
+</script>
+{% endblock %}

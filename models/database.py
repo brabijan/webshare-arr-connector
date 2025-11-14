@@ -65,6 +65,18 @@ class DownloadHistory(Base):
     move_error = Column(Text, nullable=True)  # Error during file move
     rescan_requested_at = Column(DateTime, nullable=True)  # When rescan was triggered
 
+    # Enhanced metadata fields
+    audio_languages = Column(String(200), nullable=True)  # JSON: ["cs", "en"]
+    subtitle_languages = Column(String(200), nullable=True)  # JSON: ["cs", "en", "de"]
+    video_codec = Column(String(50), nullable=True)  # "HEVC", "H.265", "H.264", "x264"
+    source_type = Column(String(50), nullable=True)  # "Blu-ray", "WEB-DL", "HDTV"
+
+    # Upgrade tracking fields
+    is_upgrade = Column(Boolean, default=False)  # True if this is an upgrade download
+    sonarr_episode_file_id = Column(Integer, nullable=True)  # Original episode file ID in Sonarr
+    radarr_movie_file_id = Column(Integer, nullable=True)  # Original movie file ID in Radarr
+    upgrade_decision = Column(String(20), nullable=True)  # NULL, "use_new", "keep_old", "keep_both"
+
     created_at = Column(DateTime, default=datetime.utcnow)
 
     def __repr__(self):

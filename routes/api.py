@@ -98,7 +98,12 @@ def confirm_download():
     POST body:
     {
         "pending_id": 123,
-        "result_index": 0
+        "result_index": 0,
+        "upgrade_metadata": {  // Optional, for upgrade downloads
+            "is_upgrade": true,
+            "episode_file_id": 123,  // or movie_file_id
+            "movie_file_id": 456
+        }
     }
     """
     try:
@@ -109,6 +114,7 @@ def confirm_download():
 
         pending_id = data.get('pending_id')
         result_index = data.get('result_index', 0)
+        upgrade_metadata = data.get('upgrade_metadata', {})
 
         if not pending_id:
             return jsonify({'error': 'pending_id is required'}), 400
@@ -141,10 +147,15 @@ def confirm_download():
                 return jsonify({'error': f'Failed to get direct link: {error}'}), 500
 
             # Generate package name
+            is_upgrade = upgrade_metadata.get('is_upgrade', False)
             if pending.source == 'sonarr':
                 package_name = f"{pending.item_title} - S{pending.season:02d}E{pending.episode:02d}"
+                if is_upgrade:
+                    package_name += " (Upgrade)"
             else:  # radarr
                 package_name = f"{pending.item_title} ({pending.year})"
+                if is_upgrade:
+                    package_name += " (Upgrade)"
 
             # Get destination path from pending confirmation
             destination_path = pending.destination_path
@@ -179,13 +190,16 @@ def confirm_download():
                 language=selected_result.get('parsed', {}).get('language'),
                 destination_path=destination_path,
                 pyload_package_id=package_id,
-                status='sent'
+                status='sent',
+                is_upgrade=is_upgrade,
+                sonarr_episode_file_id=upgrade_metadata.get('episode_file_id'),
+                radarr_movie_file_id=upgrade_metadata.get('movie_file_id')
             )
 
             db.add(history)
             db.commit()
 
-            logger.info(f"Confirmed download for pending ID {pending_id}, pyLoad package: {package_id}")
+            logger.info(f"Confirmed download for pending ID {pending_id}, pyLoad package: {package_id}, is_upgrade: {is_upgrade}")
 
             # Get navigation info for next step
             from services import navigation
@@ -777,3 +791,867 @@ def get_download_status():
     except Exception as e:
         logger.error(f"Error getting download status: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/library/series', methods=['GET'])
+def library_series():
+    """Get list of series with completed downloads"""
+    try:
+        from services.sonarr import get_client as get_sonarr
+        from services.parser import parse_filename
+        import requests
+
+        sonarr = get_sonarr()
+
+        # Get ALL series (not just monitored) directly from API
+        url = f"{sonarr.base_url}/api/v3/series"
+        response = requests.get(url, headers=sonarr.headers, timeout=15)
+
+        if response.status_code != 200:
+            logger.error(f"Failed to get series from Sonarr: {response.status_code}")
+            return jsonify({'error': 'Failed to fetch series from Sonarr'}), 500
+
+        all_series = response.json()
+
+        # Filter series that have at least one episode file
+        series_with_files = []
+        for series in all_series:
+            files = sonarr.get_series_files(series['id'])
+            if files:
+                # Find poster image
+                poster_url = None
+                for image in series.get('images', []):
+                    if image.get('coverType') == 'poster':
+                        poster_url = image.get('remoteUrl') or image.get('url')
+                        break
+
+                series_with_files.append({
+                    'id': series.get('id'),
+                    'title': series.get('title'),
+                    'year': series.get('year'),
+                    'path': series.get('path'),
+                    'poster_url': poster_url,
+                    'file_count': len(files),
+                    'monitored': series.get('monitored')
+                })
+
+        return jsonify({
+            'success': True,
+            'count': len(series_with_files),
+            'series': series_with_files
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error getting library series: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/library/series/<int:series_id>/seasons', methods=['GET'])
+def library_series_seasons(series_id):
+    """Get seasons for a series with file counts"""
+    try:
+        from services.sonarr import get_client as get_sonarr
+
+        sonarr = get_sonarr()
+        series = sonarr.get_series_by_id(series_id)
+        if not series:
+            return jsonify({'error': 'Series not found'}), 404
+
+        files = sonarr.get_series_files(series_id)
+
+        # Group files by season
+        seasons = {}
+        for file in files:
+            season_num = file.get('seasonNumber', 0)
+            if season_num not in seasons:
+                seasons[season_num] = {
+                    'seasonNumber': season_num,
+                    'fileCount': 0
+                }
+            seasons[season_num]['fileCount'] += 1
+
+        # Find poster image
+        poster_url = None
+        for image in series.get('images', []):
+            if image.get('coverType') == 'poster':
+                poster_url = image.get('remoteUrl') or image.get('url')
+                break
+
+        # Create clean series dict
+        series_dict = {
+            'id': series.get('id'),
+            'title': series.get('title'),
+            'year': series.get('year'),
+            'path': series.get('path'),
+            'poster_url': poster_url,
+            'monitored': series.get('monitored'),
+            'overview': series.get('overview')
+        }
+
+        # Convert seasons to use snake_case for consistency with template
+        seasons_list = []
+        for season_data in seasons.values():
+            seasons_list.append({
+                'season_number': season_data['seasonNumber'],
+                'file_count': season_data['fileCount']
+            })
+
+        return jsonify({
+            'success': True,
+            'series': series_dict,
+            'seasons': seasons_list
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error getting series seasons: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/library/series/<int:series_id>/season/<int:season_num>', methods=['GET'])
+def library_season_episodes(series_id, season_num):
+    """Get episodes for a season with parsed metadata"""
+    try:
+        from services.sonarr import get_client as get_sonarr
+        from services.parser import parse_filename
+        import json
+
+        sonarr = get_sonarr()
+        episodes = sonarr.get_episodes(series_id)
+        files = sonarr.get_series_files(series_id)
+
+        # Create file lookup
+        file_lookup = {f['id']: f for f in files}
+
+        # Filter and enrich episodes for this season
+        season_episodes = []
+        for ep in episodes:
+            if ep.get('seasonNumber') != season_num:
+                continue
+
+            if ep.get('hasFile') and ep.get('episodeFileId'):
+                file_id = ep['episodeFileId']
+                file_data = file_lookup.get(file_id)
+
+                if file_data:
+                    # Parse filename for metadata
+                    filename = file_data.get('relativePath', '').split('/')[-1]
+                    parsed = parse_filename(filename)
+
+                    # Convert Language objects to strings
+                    def convert_languages(lang_value):
+                        """Convert Language objects to string codes"""
+                        if lang_value is None:
+                            return []
+                        if isinstance(lang_value, list):
+                            return [str(lang) for lang in lang_value]
+                        else:
+                            return [str(lang_value)]
+
+                    # Create clean episode dict
+                    episode_dict = {
+                        'id': ep.get('id'),
+                        'episodeNumber': ep.get('episodeNumber'),
+                        'seasonNumber': ep.get('seasonNumber'),
+                        'title': ep.get('title'),
+                        'airDate': ep.get('airDate'),
+                        'hasFile': ep.get('hasFile'),
+                        'monitored': ep.get('monitored'),
+                        'overview': ep.get('overview'),
+                        'episodeFileId': file_id,
+                        'fileMetadata': {
+                            'filename': filename,
+                            'size': file_data.get('size', 0),
+                            'quality': file_data.get('quality', {}).get('quality', {}).get('name', 'Unknown'),
+                            'resolution': parsed.get('screen_size', 'Unknown'),
+                            'video_codec': parsed.get('video_codec_normalized', 'Unknown'),
+                            'source_type': parsed.get('source_type_normalized', 'Unknown'),
+                            'audio_languages': convert_languages(parsed.get('audio_languages')),
+                            'subtitle_languages': convert_languages(parsed.get('subtitle_languages')),
+                            'language': convert_languages(parsed.get('language'))
+                        }
+                    }
+                    season_episodes.append(episode_dict)
+
+        return jsonify(season_episodes), 200
+
+    except Exception as e:
+        logger.error(f"Error getting season episodes: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/library/movies', methods=['GET'])
+def library_movies():
+    """Get list of movies with completed downloads"""
+    try:
+        from services.radarr import get_client as get_radarr
+        from services.parser import parse_filename
+
+        radarr = get_radarr()
+        all_movies = radarr.get_all_movies()
+
+        # Convert Language objects to strings
+        def convert_languages(lang_value):
+            """Convert Language objects to string codes"""
+            if lang_value is None:
+                return []
+            if isinstance(lang_value, list):
+                return [str(lang) for lang in lang_value]
+            else:
+                return [str(lang_value)]
+
+        # Filter movies that have files and parse metadata
+        movies_with_files = []
+        for movie in all_movies:
+            if movie.get('hasFile') and movie.get('movieFile'):
+                file_data = movie['movieFile']
+                filename = file_data.get('relativePath', '').split('/')[-1]
+                parsed = parse_filename(filename)
+
+                # Find poster image
+                poster_url = None
+                for image in movie.get('images', []):
+                    if image.get('coverType') == 'poster':
+                        poster_url = image.get('remoteUrl') or image.get('url')
+                        break
+
+                movies_with_files.append({
+                    'id': movie.get('id'),
+                    'title': movie.get('title'),
+                    'year': movie.get('year'),
+                    'path': movie.get('path'),
+                    'poster_url': poster_url,
+                    'file_count': 1,  # Movies have 1 file
+                    'monitored': movie.get('monitored'),
+                    'fileMetadata': {
+                        'filename': filename,
+                        'size': file_data.get('size', 0),
+                        'quality': file_data.get('quality', {}).get('quality', {}).get('name', 'Unknown'),
+                        'resolution': parsed.get('screen_size', 'Unknown'),
+                        'video_codec': parsed.get('video_codec_normalized', 'Unknown'),
+                        'source_type': parsed.get('source_type_normalized', 'Unknown'),
+                        'audio_languages': convert_languages(parsed.get('audio_languages')),
+                        'subtitle_languages': convert_languages(parsed.get('subtitle_languages')),
+                        'language': convert_languages(parsed.get('language')),
+                        'movieFileId': file_data.get('id')
+                    }
+                })
+
+        return jsonify({
+            'success': True,
+            'count': len(movies_with_files),
+            'movies': movies_with_files
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error getting library movies: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/pending-upgrades/series', methods=['GET'])
+def pending_upgrades_series():
+    """Get series upgrades waiting for decision"""
+    try:
+        from services.sonarr import get_client as get_sonarr
+        from services.parser import parse_filename
+        from services.metadata_extractor import extract_video_metadata, format_metadata_for_display
+        from services.file_mover import find_downloaded_file
+        from models.database import DownloadHistory, get_db_session
+
+        db = get_db_session()
+        sonarr = get_sonarr()
+
+        # Get upgrades waiting for decision
+        pending = db.query(DownloadHistory).filter(
+            DownloadHistory.source == 'sonarr',
+            DownloadHistory.is_upgrade == True,
+            DownloadHistory.upgrade_decision.is_(None),
+            DownloadHistory.download_completed_at.isnot(None)
+        ).all()
+
+        results = []
+        for record in pending:
+            # Get old file from Sonarr
+            old_file = None
+            if record.sonarr_episode_file_id:
+                logger.info(f"Fetching episode file {record.sonarr_episode_file_id} from Sonarr for upgrade {record.id}")
+                old_file = sonarr.get_episode_file(record.sonarr_episode_file_id)
+                if not old_file:
+                    logger.warning(f"Failed to fetch episode file {record.sonarr_episode_file_id} from Sonarr - file may have been deleted")
+            else:
+                logger.warning(f"Record {record.id} has no sonarr_episode_file_id set - attempting to find file from episode data")
+                # Try to find the file by getting episode info from Sonarr
+                if record.source_id and record.season is not None and record.episode is not None:
+                    episodes = sonarr.get_episodes(record.source_id)
+                    # Find the matching episode
+                    matching_episode = None
+                    for ep in episodes:
+                        if ep.get('seasonNumber') == record.season and ep.get('episodeNumber') == record.episode:
+                            matching_episode = ep
+                            break
+
+                    if matching_episode and matching_episode.get('hasFile') and matching_episode.get('episodeFileId'):
+                        episode_file_id = matching_episode['episodeFileId']
+                        logger.info(f"Found episode file ID {episode_file_id} from episode data for S{record.season:02d}E{record.episode:02d}")
+                        old_file = sonarr.get_episode_file(episode_file_id)
+                        if old_file:
+                            logger.info(f"Successfully fetched episode file using episode data")
+                    else:
+                        logger.warning(f"Could not find file for S{record.season:02d}E{record.episode:02d} in Sonarr")
+
+            # Extract real metadata from both files
+            old_metadata = None
+            if old_file:
+                old_filename = old_file.get('relativePath', '').split('/')[-1]
+                old_path = old_file.get('path')  # Full path to file
+
+                # Try to extract real metadata from file
+                if old_path:
+                    logger.info(f"Extracting real metadata from old file: {old_path}")
+                    real_metadata = extract_video_metadata(old_path)
+                    if real_metadata:
+                        formatted = format_metadata_for_display(real_metadata)
+                        old_metadata = {
+                            'filename': old_filename,
+                            'size': old_file.get('size', 0),
+                            'quality': formatted.get('resolution', 'Unknown'),
+                            'codec': formatted.get('video_codec', 'Unknown'),
+                            'source': 'Unknown',  # Source type not in metadata
+                            'audio_languages': formatted.get('audio_languages', []),
+                            'subtitles': formatted.get('subtitle_languages', []),
+                        }
+                        logger.info(f"Successfully extracted real metadata from old file")
+
+                # Fallback to filename parsing if extraction failed
+                if not old_metadata:
+                    logger.warning(f"Falling back to filename parsing for old file: {old_filename}")
+                    old_parsed = parse_filename(old_filename)
+
+                    def convert_languages(lang_value):
+                        if lang_value is None:
+                            return []
+                        if isinstance(lang_value, list):
+                            return [str(lang) for lang in lang_value]
+                        else:
+                            return [str(lang_value)]
+
+                    old_metadata = {
+                        'filename': old_filename,
+                        'size': old_file.get('size', 0),
+                        'quality': old_parsed.get('screen_size', 'Unknown'),
+                        'codec': old_parsed.get('video_codec_normalized', 'Unknown'),
+                        'source': old_parsed.get('source_type_normalized', 'Unknown'),
+                        'audio_languages': convert_languages(old_parsed.get('audio_languages')),
+                        'subtitles': convert_languages(old_parsed.get('subtitle_languages')),
+                    }
+
+            # Extract real metadata from new file
+            new_metadata = None
+            # Find the downloaded file
+            new_file_path = find_downloaded_file(record.pyload_package_id, record.filename)
+            if new_file_path:
+                logger.info(f"Extracting real metadata from new file: {new_file_path}")
+                real_metadata = extract_video_metadata(new_file_path)
+                if real_metadata:
+                    formatted = format_metadata_for_display(real_metadata)
+                    new_metadata = {
+                        'filename': record.filename,
+                        'size': record.file_size or formatted.get('file_size', 0),
+                        'quality': formatted.get('resolution', 'Unknown'),
+                        'codec': formatted.get('video_codec', 'Unknown'),
+                        'source': 'Unknown',  # Source type not in metadata
+                        'audio_languages': formatted.get('audio_languages', []),
+                        'subtitles': formatted.get('subtitle_languages', []),
+                    }
+                    logger.info(f"Successfully extracted real metadata from new file")
+
+            # Fallback to filename parsing if extraction failed
+            if not new_metadata:
+                logger.warning(f"Falling back to filename parsing for new file: {record.filename}")
+                new_parsed = parse_filename(record.filename)
+
+                def convert_languages_new(lang_value):
+                    if lang_value is None:
+                        return []
+                    if isinstance(lang_value, list):
+                        return [str(lang) for lang in lang_value]
+                    else:
+                        return [str(lang_value)]
+
+                new_metadata = {
+                    'filename': record.filename,
+                    'size': record.file_size,
+                    'quality': new_parsed.get('screen_size', 'Unknown'),
+                    'codec': new_parsed.get('video_codec_normalized', 'Unknown'),
+                    'source': new_parsed.get('source_type_normalized', 'Unknown'),
+                    'audio_languages': convert_languages_new(new_parsed.get('audio_languages')),
+                    'subtitles': convert_languages_new(new_parsed.get('subtitle_languages')),
+                }
+
+            # Format title
+            episode_str = f"S{record.season:02d}E{record.episode:02d}"
+            title = f"{record.item_title} - {episode_str}"
+
+            results.append({
+                'id': record.id,
+                'title': title,
+                'item_title': record.item_title,
+                'season': record.season,
+                'episode': record.episode,
+                'current': old_metadata,
+                'new': new_metadata,
+                'created_at': record.created_at.isoformat() if record.created_at else None
+            })
+
+        db.close()
+        return jsonify({'upgrades': results}), 200
+
+    except Exception as e:
+        logger.error(f"Error getting pending upgrades (series): {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/pending-upgrades/movies', methods=['GET'])
+def pending_upgrades_movies():
+    """Get movie upgrades waiting for decision"""
+    try:
+        from services.radarr import get_client as get_radarr
+        from services.parser import parse_filename
+        from services.metadata_extractor import extract_video_metadata, format_metadata_for_display
+        from services.file_mover import find_downloaded_file
+        from models.database import DownloadHistory, get_db_session
+
+        db = get_db_session()
+        radarr = get_radarr()
+
+        # Get upgrades waiting for decision
+        pending = db.query(DownloadHistory).filter(
+            DownloadHistory.source == 'radarr',
+            DownloadHistory.is_upgrade == True,
+            DownloadHistory.upgrade_decision.is_(None),
+            DownloadHistory.download_completed_at.isnot(None)
+        ).all()
+
+        results = []
+        for record in pending:
+            # Get old file from Radarr
+            old_file = None
+            if record.radarr_movie_file_id:
+                logger.info(f"Fetching movie file {record.radarr_movie_file_id} from Radarr for upgrade {record.id}")
+                old_file = radarr.get_movie_file(record.radarr_movie_file_id)
+                if not old_file:
+                    logger.warning(f"Failed to fetch movie file {record.radarr_movie_file_id} from Radarr - file may have been deleted")
+            else:
+                logger.warning(f"Record {record.id} has no radarr_movie_file_id set - attempting to find file from movie data")
+                # Try to find the file by getting movie info from Radarr
+                if record.source_id:
+                    movie = radarr.get_movie_by_id(record.source_id)
+                    if movie and movie.get('hasFile') and movie.get('movieFile'):
+                        movie_file = movie['movieFile']
+                        movie_file_id = movie_file.get('id')
+                        if movie_file_id:
+                            logger.info(f"Found movie file ID {movie_file_id} from movie data for {record.item_title}")
+                            old_file = radarr.get_movie_file(movie_file_id)
+                            if old_file:
+                                logger.info(f"Successfully fetched movie file using movie data")
+                        else:
+                            # movie_file IS the file data
+                            logger.info(f"Using movie file data directly from movie object")
+                            old_file = movie_file
+                    else:
+                        logger.warning(f"Could not find file for movie {record.item_title} in Radarr")
+
+            # Extract real metadata from both files
+            old_metadata = None
+            if old_file:
+                old_filename = old_file.get('relativePath', '').split('/')[-1]
+                old_path = old_file.get('path')  # Full path to file
+
+                # Try to extract real metadata from file
+                if old_path:
+                    logger.info(f"Extracting real metadata from old file: {old_path}")
+                    real_metadata = extract_video_metadata(old_path)
+                    if real_metadata:
+                        formatted = format_metadata_for_display(real_metadata)
+                        old_metadata = {
+                            'filename': old_filename,
+                            'size': old_file.get('size', 0),
+                            'quality': formatted.get('resolution', 'Unknown'),
+                            'codec': formatted.get('video_codec', 'Unknown'),
+                            'source': 'Unknown',  # Source type not in metadata
+                            'audio_languages': formatted.get('audio_languages', []),
+                            'subtitles': formatted.get('subtitle_languages', []),
+                        }
+                        logger.info(f"Successfully extracted real metadata from old file")
+
+                # Fallback to filename parsing if extraction failed
+                if not old_metadata:
+                    logger.warning(f"Falling back to filename parsing for old file: {old_filename}")
+                    old_parsed = parse_filename(old_filename)
+
+                    def convert_languages(lang_value):
+                        if lang_value is None:
+                            return []
+                        if isinstance(lang_value, list):
+                            return [str(lang) for lang in lang_value]
+                        else:
+                            return [str(lang_value)]
+
+                    old_metadata = {
+                        'filename': old_filename,
+                        'size': old_file.get('size', 0),
+                        'quality': old_parsed.get('screen_size', 'Unknown'),
+                        'codec': old_parsed.get('video_codec_normalized', 'Unknown'),
+                        'source': old_parsed.get('source_type_normalized', 'Unknown'),
+                        'audio_languages': convert_languages(old_parsed.get('audio_languages')),
+                        'subtitles': convert_languages(old_parsed.get('subtitle_languages')),
+                    }
+
+            # Extract real metadata from new file
+            new_metadata = None
+            # Find the downloaded file
+            new_file_path = find_downloaded_file(record.pyload_package_id, record.filename)
+            if new_file_path:
+                logger.info(f"Extracting real metadata from new file: {new_file_path}")
+                real_metadata = extract_video_metadata(new_file_path)
+                if real_metadata:
+                    formatted = format_metadata_for_display(real_metadata)
+                    new_metadata = {
+                        'filename': record.filename,
+                        'size': record.file_size or formatted.get('file_size', 0),
+                        'quality': formatted.get('resolution', 'Unknown'),
+                        'codec': formatted.get('video_codec', 'Unknown'),
+                        'source': 'Unknown',  # Source type not in metadata
+                        'audio_languages': formatted.get('audio_languages', []),
+                        'subtitles': formatted.get('subtitle_languages', []),
+                    }
+                    logger.info(f"Successfully extracted real metadata from new file")
+
+            # Fallback to filename parsing if extraction failed
+            if not new_metadata:
+                logger.warning(f"Falling back to filename parsing for new file: {record.filename}")
+                new_parsed = parse_filename(record.filename)
+
+                def convert_languages_new(lang_value):
+                    if lang_value is None:
+                        return []
+                    if isinstance(lang_value, list):
+                        return [str(lang) for lang in lang_value]
+                    else:
+                        return [str(lang_value)]
+
+                new_metadata = {
+                    'filename': record.filename,
+                    'size': record.file_size,
+                    'quality': new_parsed.get('screen_size', 'Unknown'),
+                    'codec': new_parsed.get('video_codec_normalized', 'Unknown'),
+                    'source': new_parsed.get('source_type_normalized', 'Unknown'),
+                    'audio_languages': convert_languages_new(new_parsed.get('audio_languages')),
+                    'subtitles': convert_languages_new(new_parsed.get('subtitle_languages')),
+                }
+
+            # Format title
+            title = f"{record.item_title} ({record.year})" if record.year else record.item_title
+
+            results.append({
+                'id': record.id,
+                'title': title,
+                'item_title': record.item_title,
+                'year': record.year,
+                'current': old_metadata,
+                'new': new_metadata,
+                'created_at': record.created_at.isoformat() if record.created_at else None
+            })
+
+        db.close()
+        return jsonify({'upgrades': results}), 200
+
+    except Exception as e:
+        logger.error(f"Error getting pending upgrades (movies): {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/search-upgrade', methods=['POST'])
+def search_upgrade():
+    """Search for better version and return results for user selection"""
+    try:
+        from services.sonarr import get_client as get_sonarr
+        from services.radarr import get_client as get_radarr
+        from services.search import search_for_item, create_pending_confirmation
+
+        data = request.get_json()
+        source = data.get('source')  # 'sonarr' or 'radarr'
+
+        if source == 'sonarr':
+            series_id = data.get('series_id')
+            season = data.get('season')
+            episode = data.get('episode')
+            episode_file_id = data.get('episode_file_id')
+
+            sonarr = get_sonarr()
+            series = sonarr.get_series_by_id(series_id)
+
+            if not series:
+                return jsonify({'error': 'Series not found'}), 404
+
+            # Create search query
+            item_info = {
+                'source': 'sonarr',
+                'series_id': series_id,
+                'series_title': series['title'],
+                'season': season,
+                'episode': episode
+            }
+
+            # Search for better version (uses existing scoring system from services/search.py)
+            results = search_for_item(item_info, top_n=10)
+
+            if not results:
+                return jsonify({
+                    'success': True,
+                    'results_count': 0,
+                    'results': [],
+                    'message': 'No results found'
+                }), 200
+
+            # Create pending confirmation with upgrade metadata
+            pending_id = create_pending_confirmation(item_info, results)
+
+            # Store upgrade-specific metadata in pending confirmation
+            if pending_id:
+                db = get_db_session()
+                try:
+                    pending = db.query(PendingConfirmation).filter(
+                        PendingConfirmation.id == pending_id
+                    ).first()
+                    if pending:
+                        pending.destination_path = series.get('path', '')
+                        # Store upgrade metadata in pending confirmation
+                        # We'll add these fields when downloading
+                        db.commit()
+                finally:
+                    db.close()
+
+            return jsonify({
+                'success': True,
+                'pending_id': pending_id,
+                'results_count': len(results),
+                'results': results,
+                'upgrade_metadata': {
+                    'episode_file_id': episode_file_id,
+                    'is_upgrade': True
+                }
+            }), 200
+
+        elif source == 'radarr':
+            movie_id = data.get('movie_id')
+            movie_file_id = data.get('movie_file_id')
+
+            radarr = get_radarr()
+            movie = radarr.get_movie_by_id(movie_id)
+
+            if not movie:
+                return jsonify({'error': 'Movie not found'}), 404
+
+            # Create search query
+            item_info = {
+                'source': 'radarr',
+                'movie_id': movie_id,
+                'title': movie['title'],
+                'year': movie.get('year')
+            }
+
+            # Search for better version
+            results = search_for_item(item_info, top_n=10)
+
+            if not results:
+                return jsonify({
+                    'success': True,
+                    'results_count': 0,
+                    'results': [],
+                    'message': 'No results found'
+                }), 200
+
+            # Create pending confirmation with upgrade metadata
+            pending_id = create_pending_confirmation(item_info, results)
+
+            # Store upgrade-specific metadata
+            if pending_id:
+                db = get_db_session()
+                try:
+                    pending = db.query(PendingConfirmation).filter(
+                        PendingConfirmation.id == pending_id
+                    ).first()
+                    if pending:
+                        pending.destination_path = movie.get('path', '')
+                        db.commit()
+                finally:
+                    db.close()
+
+            return jsonify({
+                'success': True,
+                'pending_id': pending_id,
+                'results_count': len(results),
+                'results': results,
+                'upgrade_metadata': {
+                    'movie_file_id': movie_file_id,
+                    'is_upgrade': True
+                }
+            }), 200
+        else:
+            return jsonify({'error': 'Invalid source'}), 400
+
+    except Exception as e:
+        logger.error(f"Error in search-upgrade: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/confirm-upgrade', methods=['POST'])
+def confirm_upgrade():
+    """Confirm upgrade decision and execute action"""
+    try:
+        from services.sonarr import get_client as get_sonarr
+        from services.radarr import get_client as get_radarr
+        from services.file_mover import construct_destination_path, find_downloaded_file
+        from models.database import DownloadHistory, get_db_session
+        from datetime import datetime
+        from pathlib import Path
+        import shutil
+        import os
+
+        data = request.get_json()
+        # Accept both upgrade_id and record_id for compatibility
+        record_id = data.get('upgrade_id') or data.get('record_id')
+        action = data.get('action')  # 'use_new', 'keep_old', 'keep_both'
+
+        if action not in ['use_new', 'keep_old', 'keep_both']:
+            return jsonify({'status': 'error', 'message': 'Invalid action'}), 400
+
+        db = get_db_session()
+        record = db.query(DownloadHistory).filter_by(id=record_id).first()
+
+        if not record:
+            db.close()
+            return jsonify({'status': 'error', 'message': 'Record not found'}), 404
+
+        if not record.is_upgrade:
+            db.close()
+            return jsonify({'status': 'error', 'message': 'Not an upgrade record'}), 400
+
+        # Execute action
+        if action == 'use_new':
+            # Move new file to destination and delete old file
+            dest_path = construct_destination_path(record)
+            source_path = find_downloaded_file(record.pyload_package_id, record.filename)
+
+            if not source_path:
+                db.close()
+                return jsonify({'status': 'error', 'message': 'New file not found in pyLoad directory'}), 404
+
+            # Move new file FIRST (before deleting old one)
+            try:
+                dest_dir = Path(dest_path).parent
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_path, dest_path)
+                logger.info(f"New file copied to destination: {dest_path}")
+                os.remove(source_path)
+                logger.info(f"New file removed from pyLoad directory: {source_path}")
+            except Exception as e:
+                db.close()
+                logger.error(f"Failed to move new file: {str(e)}", exc_info=True)
+                return jsonify({'status': 'error', 'message': f'Failed to move new file: {str(e)}'}), 500
+
+            # Delete old file from Sonarr/Radarr AFTER new file is successfully moved
+            if record.source == 'sonarr' and record.sonarr_episode_file_id:
+                sonarr = get_sonarr()
+                delete_success = sonarr.delete_episode_file(record.sonarr_episode_file_id)
+                if delete_success:
+                    logger.info(f"Old episode file {record.sonarr_episode_file_id} deleted from Sonarr")
+                else:
+                    logger.warning(f"Failed to delete old episode file {record.sonarr_episode_file_id} from Sonarr")
+            elif record.source == 'radarr' and record.radarr_movie_file_id:
+                radarr = get_radarr()
+                delete_success = radarr.delete_movie_file(record.radarr_movie_file_id)
+                if delete_success:
+                    logger.info(f"Old movie file {record.radarr_movie_file_id} deleted from Radarr")
+                else:
+                    logger.warning(f"Failed to delete old movie file {record.radarr_movie_file_id} from Radarr")
+
+            # Update record
+            record.file_moved_at = datetime.utcnow()
+            record.final_path = dest_path
+            record.upgrade_decision = 'use_new'
+
+        elif action == 'keep_old':
+            # Delete new file from pyLoad directory
+            logger.info(f"Keep old action: Looking for new file to delete. Package ID: {record.pyload_package_id}, Filename: {record.filename}")
+            source_path = find_downloaded_file(record.pyload_package_id, record.filename)
+
+            if not source_path:
+                logger.warning(f"New file not found by find_downloaded_file(). Package ID: {record.pyload_package_id}, Filename: {record.filename}")
+                # Update record even if file not found (might have been manually deleted)
+                record.upgrade_decision = 'keep_old'
+            elif not Path(source_path).exists():
+                logger.warning(f"New file path returned but file doesn't exist: {source_path}")
+                # Update record even if file doesn't exist
+                record.upgrade_decision = 'keep_old'
+            else:
+                # File found and exists, delete it
+                try:
+                    logger.info(f"Attempting to delete new file: {source_path}")
+                    os.remove(source_path)
+                    logger.info(f"Successfully deleted new file from pyLoad directory: {source_path}")
+                    record.upgrade_decision = 'keep_old'
+                except PermissionError as e:
+                    error_msg = f"Permission denied when deleting file {source_path}: {str(e)}"
+                    logger.error(error_msg, exc_info=True)
+                    db.close()
+                    return jsonify({'status': 'error', 'message': error_msg}), 500
+                except Exception as e:
+                    error_msg = f"Failed to delete new file {source_path}: {str(e)}"
+                    logger.error(error_msg, exc_info=True)
+                    db.close()
+                    return jsonify({'status': 'error', 'message': error_msg}), 500
+
+        elif action == 'keep_both':
+            # Move new file with suffix
+            dest_path = construct_destination_path(record)
+            source_path = find_downloaded_file(record.pyload_package_id, record.filename)
+
+            if not source_path:
+                db.close()
+                return jsonify({'status': 'error', 'message': 'New file not found in pyLoad directory'}), 404
+
+            # Add suffix to filename
+            path_obj = Path(dest_path)
+            dest_path_v2 = str(path_obj.parent / f"{path_obj.stem}_v2{path_obj.suffix}")
+
+            # Move new file
+            try:
+                dest_dir = Path(dest_path_v2).parent
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_path, dest_path_v2)
+                logger.info(f"New file copied to destination with v2 suffix: {dest_path_v2}")
+                os.remove(source_path)
+                logger.info(f"New file removed from pyLoad directory: {source_path}")
+            except Exception as e:
+                db.close()
+                logger.error(f"Failed to move new file: {str(e)}", exc_info=True)
+                return jsonify({'status': 'error', 'message': f'Failed to move new file: {str(e)}'}), 500
+
+            # Update record
+            record.file_moved_at = datetime.utcnow()
+            record.final_path = dest_path_v2
+            record.upgrade_decision = 'keep_both'
+
+        db.commit()
+        db.close()
+
+        return jsonify({
+            'status': 'success',
+            'action': action,
+            'message': f'Upgrade decision "{action}" executed successfully'
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error in confirm-upgrade: {str(e)}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500

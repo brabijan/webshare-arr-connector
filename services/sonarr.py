@@ -85,6 +85,70 @@ class SonarrClient:
             logger.error(f"Error fetching series: {e}")
             return []
 
+    def get_series_by_id(self, series_id):
+        """
+        Get series details by ID
+
+        Args:
+            series_id (int): Sonarr series ID
+
+        Returns:
+            dict: Series details, or None if not found
+        """
+        url = f"{self.base_url}/api/v3/series/{series_id}"
+
+        try:
+            logger.info(f"Fetching series {series_id} from Sonarr")
+            response = requests.get(
+                url,
+                headers=self.headers,
+                timeout=15
+            )
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Sonarr API error: {response.status_code} - {response.text[:200]}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error fetching series {series_id}: {e}")
+            return None
+
+    def get_episodes(self, series_id):
+        """
+        Get all episodes for a series
+
+        Args:
+            series_id (int): Sonarr series ID
+
+        Returns:
+            list: List of episodes
+        """
+        url = f"{self.base_url}/api/v3/episode"
+        params = {'seriesId': series_id}
+
+        try:
+            logger.debug(f"Fetching episodes for series {series_id}")
+            response = requests.get(
+                url,
+                headers=self.headers,
+                params=params,
+                timeout=15
+            )
+
+            if response.status_code == 200:
+                episodes = response.json()
+                logger.debug(f"Found {len(episodes)} episodes for series {series_id}")
+                return episodes
+            else:
+                logger.error(f"Sonarr API error: {response.status_code} - {response.text[:200]}")
+                return []
+
+        except Exception as e:
+            logger.error(f"Error fetching episodes for series {series_id}: {e}")
+            return []
+
     def get_series_missing_episodes(self, series_id):
         """
         Get missing episodes for a specific series, grouped by season
@@ -210,6 +274,91 @@ class SonarrClient:
 
         logger.info(f"Generated {len(queries)} search queries for {title} S{season:02d}E{episode:02d}")
         return queries
+
+    def get_episode_file(self, episode_file_id):
+        """
+        Get episode file details by ID
+
+        Args:
+            episode_file_id: Episode file ID from Sonarr
+
+        Returns:
+            dict: Episode file details, or None if error
+        """
+        try:
+            url = f"{self.base_url}/api/v3/episodefile/{episode_file_id}"
+            headers = {"X-Api-Key": self.api_key}
+
+            logger.debug(f"Getting episode file {episode_file_id} from Sonarr")
+            response = requests.get(url, headers=headers, timeout=30)
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Failed to get episode file {episode_file_id}: {response.status_code}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error getting episode file {episode_file_id}: {str(e)}")
+            return None
+
+    def delete_episode_file(self, episode_file_id):
+        """
+        Delete episode file from Sonarr
+
+        Args:
+            episode_file_id: Episode file ID to delete
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            url = f"{self.base_url}/api/v3/episodefile/{episode_file_id}"
+            headers = {"X-Api-Key": self.api_key}
+
+            logger.info(f"Deleting episode file {episode_file_id} from Sonarr")
+            response = requests.delete(url, headers=headers, timeout=30)
+
+            if response.status_code in [200, 204]:
+                logger.info(f"Episode file {episode_file_id} deleted successfully")
+                return True
+            else:
+                logger.error(f"Failed to delete episode file {episode_file_id}: {response.status_code}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error deleting episode file {episode_file_id}: {str(e)}")
+            return False
+
+    def get_series_files(self, series_id):
+        """
+        Get all episode files for a series
+
+        Args:
+            series_id: Sonarr series ID
+
+        Returns:
+            list: List of episode file dicts, or empty list if error
+        """
+        try:
+            url = f"{self.base_url}/api/v3/episodefile"
+            headers = {"X-Api-Key": self.api_key}
+            params = {"seriesId": series_id}
+
+            logger.debug(f"Getting episode files for series {series_id}")
+            response = requests.get(url, headers=headers, params=params, timeout=30)
+
+            if response.status_code == 200:
+                files = response.json()
+                logger.debug(f"Found {len(files)} episode files for series {series_id}")
+                return files
+            else:
+                logger.error(f"Failed to get episode files for series {series_id}: {response.status_code}")
+                return []
+
+        except Exception as e:
+            logger.error(f"Error getting episode files for series {series_id}: {str(e)}")
+            return []
 
     def trigger_series_rescan(self, series_id):
         """

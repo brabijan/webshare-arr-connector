@@ -6,18 +6,146 @@ import config
 logger = logging.getLogger(__name__)
 
 
+def extract_audio_languages(parsed_info):
+    """
+    Extract audio languages from guessit parsed info
+
+    Args:
+        parsed_info: Dict from guessit
+
+    Returns:
+        list: List of language codes (e.g., ["cs", "en"])
+    """
+    audio_langs = parsed_info.get('audio_language', [])
+
+    # Handle both list and single value
+    if not isinstance(audio_langs, list):
+        audio_langs = [audio_langs]
+
+    # Convert to lowercase 2-letter codes
+    result = []
+    for lang in audio_langs:
+        lang_str = str(lang).lower()
+        # Try to extract 2-letter code
+        if len(lang_str) >= 2:
+            result.append(lang_str[:2])
+
+    return result
+
+
+def extract_subtitle_languages(parsed_info):
+    """
+    Extract subtitle languages from guessit parsed info
+
+    Args:
+        parsed_info: Dict from guessit
+
+    Returns:
+        list: List of language codes (e.g., ["cs", "en", "de"])
+    """
+    subtitle_langs = parsed_info.get('subtitle_language', [])
+
+    # Handle both list and single value
+    if not isinstance(subtitle_langs, list):
+        subtitle_langs = [subtitle_langs]
+
+    # Convert to lowercase 2-letter codes
+    result = []
+    for lang in subtitle_langs:
+        lang_str = str(lang).lower()
+        # Try to extract 2-letter code
+        if len(lang_str) >= 2:
+            result.append(lang_str[:2])
+
+    return result
+
+
+def normalize_video_codec(parsed_info):
+    """
+    Normalize video codec names
+
+    Args:
+        parsed_info: Dict from guessit
+
+    Returns:
+        str: Normalized codec name ("HEVC", "H.265", "H.264", "x264", etc.)
+    """
+    video_codec = parsed_info.get('video_codec', '')
+    if not video_codec:
+        return ''
+
+    codec_str = str(video_codec).upper()
+
+    # Normalize common codec representations
+    if codec_str in ['H265', 'H.265', 'HEVC', 'X265']:
+        return 'HEVC'
+    elif codec_str in ['H264', 'H.264', 'X264', 'AVC']:
+        return 'H.264'
+    elif codec_str in ['VP9']:
+        return 'VP9'
+    elif codec_str in ['AV1']:
+        return 'AV1'
+
+    return codec_str
+
+
+def normalize_source_type(parsed_info):
+    """
+    Normalize source type
+
+    Args:
+        parsed_info: Dict from guessit
+
+    Returns:
+        str: Normalized source ("Blu-ray", "WEB-DL", "HDTV", etc.)
+    """
+    source = parsed_info.get('source', '')
+    if not source:
+        return ''
+
+    source_str = str(source)
+
+    # Normalize common source types
+    source_mapping = {
+        'Blu-ray': 'Blu-ray',
+        'BluRay': 'Blu-ray',
+        'Ultra HD Blu-ray': 'UHD Blu-ray',
+        'Web': 'WEB-DL',
+        'WEB': 'WEB-DL',
+        'HDTV': 'HDTV',
+        'DVD': 'DVD',
+        'DVDRip': 'DVD',
+        'SDTV': 'SDTV',
+        'Satellite': 'Satellite'
+    }
+
+    return source_mapping.get(source_str, source_str)
+
+
 def parse_filename(filename):
     """
-    Parse filename using GuessIt
+    Parse filename using GuessIt with extended metadata extraction
 
     Args:
         filename (str): Filename to parse
 
     Returns:
-        dict: Parsed information
+        dict: Parsed information with additional metadata fields:
+            - audio_languages: list of audio language codes
+            - subtitle_languages: list of subtitle language codes
+            - video_codec_normalized: normalized video codec name
+            - source_type_normalized: normalized source type
     """
     try:
-        return guessit(filename)
+        parsed_info = guessit(filename)
+
+        # Add extended metadata
+        parsed_info['audio_languages'] = extract_audio_languages(parsed_info)
+        parsed_info['subtitle_languages'] = extract_subtitle_languages(parsed_info)
+        parsed_info['video_codec_normalized'] = normalize_video_codec(parsed_info)
+        parsed_info['source_type_normalized'] = normalize_source_type(parsed_info)
+
+        return parsed_info
     except Exception as e:
         logger.error(f"Error parsing filename '{filename}': {e}")
         return {}

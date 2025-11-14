@@ -53,6 +53,35 @@ class RadarrClient:
             logger.error(f"Error fetching missing movies: {e}")
             return []
 
+    def get_all_movies(self):
+        """
+        Get all movies from Radarr
+
+        Returns:
+            list: List of all movies
+        """
+        url = f"{self.base_url}/api/v3/movie"
+
+        try:
+            logger.info("Fetching all movies from Radarr")
+            response = requests.get(
+                url,
+                headers=self.headers,
+                timeout=15
+            )
+
+            if response.status_code == 200:
+                all_movies = response.json()
+                logger.info(f"Found {len(all_movies)} movies in Radarr")
+                return all_movies
+            else:
+                logger.error(f"Radarr API error: {response.status_code} - {response.text[:200]}")
+                return []
+
+        except Exception as e:
+            logger.error(f"Error fetching movies: {e}")
+            return []
+
     def get_all_monitored_movies(self):
         """
         Get all monitored movies without files from Radarr
@@ -89,6 +118,36 @@ class RadarrClient:
         except Exception as e:
             logger.error(f"Error fetching movies: {e}")
             return []
+
+    def get_movie_by_id(self, movie_id):
+        """
+        Get movie details by ID
+
+        Args:
+            movie_id (int): Radarr movie ID
+
+        Returns:
+            dict: Movie details, or None if not found
+        """
+        url = f"{self.base_url}/api/v3/movie/{movie_id}"
+
+        try:
+            logger.info(f"Fetching movie {movie_id} from Radarr")
+            response = requests.get(
+                url,
+                headers=self.headers,
+                timeout=15
+            )
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Radarr API error: {response.status_code} - {response.text[:200]}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error fetching movie {movie_id}: {e}")
+            return None
 
     def parse_webhook(self, webhook_data):
         """
@@ -193,6 +252,61 @@ class RadarrClient:
 
         except Exception as e:
             logger.error(f"Error triggering movie rescan: {str(e)}")
+            return False
+
+    def get_movie_file(self, movie_file_id):
+        """
+        Get movie file details by ID
+
+        Args:
+            movie_file_id: Movie file ID from Radarr
+
+        Returns:
+            dict: Movie file details, or None if error
+        """
+        try:
+            url = f"{self.base_url}/api/v3/moviefile/{movie_file_id}"
+            headers = {"X-Api-Key": self.api_key}
+
+            logger.debug(f"Getting movie file {movie_file_id} from Radarr")
+            response = requests.get(url, headers=headers, timeout=30)
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Failed to get movie file {movie_file_id}: {response.status_code}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error getting movie file {movie_file_id}: {str(e)}")
+            return None
+
+    def delete_movie_file(self, movie_file_id):
+        """
+        Delete movie file from Radarr
+
+        Args:
+            movie_file_id: Movie file ID to delete
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            url = f"{self.base_url}/api/v3/moviefile/{movie_file_id}"
+            headers = {"X-Api-Key": self.api_key}
+
+            logger.info(f"Deleting movie file {movie_file_id} from Radarr")
+            response = requests.delete(url, headers=headers, timeout=30)
+
+            if response.status_code in [200, 204]:
+                logger.info(f"Movie file {movie_file_id} deleted successfully")
+                return True
+            else:
+                logger.error(f"Failed to delete movie file {movie_file_id}: {response.status_code}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Error deleting movie file {movie_file_id}: {str(e)}")
             return False
 
 

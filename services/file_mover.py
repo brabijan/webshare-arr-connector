@@ -94,6 +94,15 @@ def move_completed_file(record, db):
         if not record.pyload_package_id:
             return False, "No pyLoad package ID"
 
+        # Skip automatic move for upgrade downloads - wait for user decision
+        if record.is_upgrade:
+            logger.info(f"Skipping automatic move for upgrade download (record {record.id}) - waiting for user decision")
+            # Mark as download completed but don't move
+            if not record.download_completed_at:
+                record.download_completed_at = datetime.utcnow()
+                db.commit()
+            return False, "Upgrade waiting for user decision"
+
         # Construct destination path first (to check if file already exists)
         dest_path = construct_destination_path(record)
         if not dest_path:
