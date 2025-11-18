@@ -579,13 +579,36 @@ function renderEpisodes(episodes) {
         cellSize.innerHTML = `<span style="margin-right: 5px;">💾</span>${formatFileSize(size)}`;
         row.appendChild(cellSize);
 
-        // Action button
+        // Action button / Upgrade status
         const cellAction = document.createElement('td');
-        const btn = document.createElement('button');
-        btn.className = 'btn';
-        btn.innerHTML = 'Find Better Version';
-        btn.onclick = (event) => searchUpgrade(event, episode, meta);
-        cellAction.appendChild(btn);
+
+        if (episode.upgrade) {
+            // There's a pending upgrade
+            if (episode.upgrade.download_status === 'downloading') {
+                // Still downloading
+                const badge = document.createElement('span');
+                badge.className = 'badge';
+                badge.style.cssText = 'background: #FFC107; color: #000; font-size: 13px; padding: 8px 12px;';
+                badge.innerHTML = '⬇️ Downloading...';
+                cellAction.appendChild(badge);
+            } else {
+                // Download completed, show link to pending upgrades or inline comparison
+                const link = document.createElement('a');
+                link.href = '/pending-upgrades';
+                link.className = 'btn';
+                link.style.cssText = 'background: #4CAF50; text-decoration: none; display: inline-block;';
+                link.innerHTML = '✓ View Upgrade';
+                cellAction.appendChild(link);
+            }
+        } else {
+            // No upgrade, show search button
+            const btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.innerHTML = 'Find Better Version';
+            btn.onclick = (event) => searchUpgrade(event, episode, meta);
+            cellAction.appendChild(btn);
+        }
+
         row.appendChild(cellAction);
 
         list.appendChild(row);

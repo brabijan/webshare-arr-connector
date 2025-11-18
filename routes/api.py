@@ -915,18 +915,57 @@ def library_series_seasons(series_id):
 
 @api_bp.route('/library/series/<int:series_id>/season/<int:season_num>', methods=['GET'])
 def library_season_episodes(series_id, season_num):
-    """Get episodes for a season with parsed metadata"""
+    """Get episodes for a season with extracted metadata from files"""
     try:
         from services.sonarr import get_client as get_sonarr
         from services.parser import parse_filename
+        from services.metadata_extractor import extract_video_metadata, format_metadata_for_display, is_ffprobe_available
+        from services.file_mover import find_downloaded_file
+        from models.database import DownloadHistory, get_db_session
+        from pathlib import Path
         import json
 
         sonarr = get_sonarr()
+        series = sonarr.get_series_by_id(series_id)
         episodes = sonarr.get_episodes(series_id)
         files = sonarr.get_series_files(series_id)
+        db = get_db_session()
+
+        if not series:
+            return jsonify({'error': 'Series not found'}), 404
+
+        series_path = series.get('path', '')
+        use_ffprobe = is_ffprobe_available()
+
+        if not use_ffprobe:
+            logger.warning("ffprobe not available, falling back to filename parsing")
 
         # Create file lookup
         file_lookup = {f['id']: f for f in files}
+
+        # Get all pending upgrades for this series
+        pending_upgrades = db.query(DownloadHistory).filter(
+            DownloadHistory.source == 'sonarr',
+            DownloadHistory.source_id == series_id,
+            DownloadHistory.is_upgrade == True,
+            DownloadHistory.upgrade_decision.is_(None)
+        ).all()
+
+        # Create lookup by season/episode
+        upgrade_lookup = {}
+        for upgrade in pending_upgrades:
+            key = (upgrade.season, upgrade.episode)
+            upgrade_lookup[key] = upgrade
+
+        # Convert Language objects to strings
+        def convert_languages(lang_value):
+            """Convert Language objects to string codes"""
+            if lang_value is None:
+                return []
+            if isinstance(lang_value, list):
+                return [str(lang) for lang in lang_value]
+            else:
+                return [str(lang_value)]
 
         # Filter and enrich episodes for this season
         season_episodes = []
@@ -939,19 +978,79 @@ def library_season_episodes(series_id, season_num):
                 file_data = file_lookup.get(file_id)
 
                 if file_data:
-                    # Parse filename for metadata
                     filename = file_data.get('relativePath', '').split('/')[-1]
-                    parsed = parse_filename(filename)
+                    relative_path = file_data.get('relativePath', '')
 
-                    # Convert Language objects to strings
-                    def convert_languages(lang_value):
-                        """Convert Language objects to string codes"""
-                        if lang_value is None:
-                            return []
-                        if isinstance(lang_value, list):
-                            return [str(lang) for lang in lang_value]
-                        else:
-                            return [str(lang_value)]
+                    # Build full file path
+                    full_path = Path(series_path) / relative_path
+
+                    # Try to extract metadata from file using ffprobe
+                    metadata = None
+                    if use_ffprobe and full_path.exists():
+                        raw_metadata = extract_video_metadata(str(full_path))
+                        if raw_metadata:
+                            metadata = format_metadata_for_display(raw_metadata)
+
+                    # Fallback to filename parsing if ffprobe failed or not available
+                    if not metadata:
+                        logger.debug(f"Using filename parsing for {filename}")
+                        parsed = parse_filename(filename)
+                        metadata = {
+                            'resolution': parsed.get('screen_size', 'Unknown'),
+                            'video_codec': parsed.get('video_codec_normalized', 'Unknown'),
+                            'audio_languages': convert_languages(parsed.get('audio_languages')),
+                            'subtitle_languages': convert_languages(parsed.get('subtitle_languages')),
+                        }
+
+                    # Check if there's a pending upgrade for this episode
+                    upgrade_info = None
+                    episode_key = (season_num, ep.get('episodeNumber'))
+                    if episode_key in upgrade_lookup:
+                        upgrade_record = upgrade_lookup[episode_key]
+
+                        # Determine download status
+                        is_downloading = upgrade_record.download_completed_at is None
+                        download_status = 'downloading' if is_downloading else 'completed'
+
+                        # Get new file metadata
+                        new_metadata = None
+                        new_parsed = parse_filename(upgrade_record.filename)
+
+                        if not is_downloading:
+                            # File is downloaded, try to extract real metadata
+                            new_file_path = find_downloaded_file(upgrade_record.pyload_package_id, upgrade_record.filename)
+                            if new_file_path and use_ffprobe:
+                                real_metadata = extract_video_metadata(new_file_path)
+                                if real_metadata:
+                                    formatted = format_metadata_for_display(real_metadata)
+                                    new_metadata = {
+                                        'filename': upgrade_record.filename,
+                                        'size': upgrade_record.file_size or formatted.get('file_size', 0),
+                                        'quality': formatted.get('resolution', 'Unknown'),
+                                        'codec': formatted.get('video_codec', 'Unknown'),
+                                        'source': new_parsed.get('source_type_normalized', 'Unknown'),
+                                        'audio_languages': formatted.get('audio_languages', []),
+                                        'subtitles': formatted.get('subtitle_languages', []),
+                                    }
+
+                        # Fallback to filename parsing
+                        if not new_metadata:
+                            new_metadata = {
+                                'filename': upgrade_record.filename,
+                                'size': upgrade_record.file_size,
+                                'quality': new_parsed.get('screen_size', 'Unknown'),
+                                'codec': new_parsed.get('video_codec_normalized', 'Unknown'),
+                                'source': new_parsed.get('source_type_normalized', 'Unknown'),
+                                'audio_languages': convert_languages(new_parsed.get('audio_languages')),
+                                'subtitles': convert_languages(new_parsed.get('subtitle_languages')),
+                            }
+
+                        upgrade_info = {
+                            'id': upgrade_record.id,
+                            'download_status': download_status,
+                            'new_metadata': new_metadata,
+                            'created_at': upgrade_record.created_at.isoformat() if upgrade_record.created_at else None
+                        }
 
                     # Create clean episode dict
                     episode_dict = {
@@ -965,23 +1064,25 @@ def library_season_episodes(series_id, season_num):
                         'overview': ep.get('overview'),
                         'episodeFileId': file_id,
                         'fileMetadata': {
-                            'episodeFileId': file_id,  # Add here for easier access in frontend
+                            'episodeFileId': file_id,
                             'filename': filename,
                             'size': file_data.get('size', 0),
                             'quality': file_data.get('quality', {}).get('quality', {}).get('name', 'Unknown'),
-                            'resolution': parsed.get('screen_size', 'Unknown'),
-                            'video_codec': parsed.get('video_codec_normalized', 'Unknown'),
-                            'source_type': parsed.get('source_type_normalized', 'Unknown'),
-                            'audio_languages': convert_languages(parsed.get('audio_languages')),
-                            'subtitle_languages': convert_languages(parsed.get('subtitle_languages')),
-                            'language': convert_languages(parsed.get('language'))
-                        }
+                            'resolution': metadata.get('resolution', 'Unknown'),
+                            'video_codec': metadata.get('video_codec', 'Unknown'),
+                            'source_type': parse_filename(filename).get('source_type_normalized', 'Unknown'),
+                            'audio_languages': metadata.get('audio_languages', []),
+                            'subtitle_languages': metadata.get('subtitle_languages', []),
+                            'language': convert_languages(parse_filename(filename).get('language'))
+                        },
+                        'upgrade': upgrade_info
                     }
                     season_episodes.append(episode_dict)
 
         # Sort episodes by episode number
         season_episodes.sort(key=lambda x: x['episodeNumber'])
 
+        db.close()
         return jsonify(season_episodes), 200
 
     except Exception as e:
