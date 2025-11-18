@@ -29,7 +29,7 @@ def construct_destination_path(record):
 
     # For TV shows, add season folder
     if record.source == 'sonarr' and record.season is not None:
-        season_folder = f"Season {record.season:02d}"
+        season_folder = f"Season {record.season}"
         full_path = base_path / season_folder / record.filename
     else:
         # For movies, just use base path + filename
