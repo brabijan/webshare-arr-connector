@@ -835,6 +835,9 @@ def library_series():
                     'monitored': series.get('monitored')
                 })
 
+        # Sort series alphabetically by title
+        series_with_files.sort(key=lambda x: x['title'].lower() if x['title'] else '')
+
         return jsonify({
             'success': True,
             'count': len(series_with_files),
@@ -895,6 +898,9 @@ def library_series_seasons(series_id):
                 'season_number': season_data['seasonNumber'],
                 'file_count': season_data['fileCount']
             })
+
+        # Sort seasons by season number
+        seasons_list.sort(key=lambda x: x['season_number'])
 
         return jsonify({
             'success': True,
@@ -973,6 +979,9 @@ def library_season_episodes(series_id, season_num):
                     }
                     season_episodes.append(episode_dict)
 
+        # Sort episodes by episode number
+        season_episodes.sort(key=lambda x: x['episodeNumber'])
+
         return jsonify(season_episodes), 200
 
     except Exception as e:
@@ -1036,6 +1045,9 @@ def library_movies():
                         'movieFileId': file_data.get('id')
                     }
                 })
+
+        # Sort movies alphabetically by title
+        movies_with_files.sort(key=lambda x: x['title'].lower() if x['title'] else '')
 
         return jsonify({
             'success': True,
