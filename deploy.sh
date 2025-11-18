@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Deploy script for Webshare Downloader
-# Usage: ./deploy.sh [--skip-backup] [--no-build]
+# Usage: ./deploy.sh [--skip-backup] [--no-build] [--clear-db]
 #
 
 set -e  # Exit on error
@@ -21,6 +21,7 @@ DB_FILE="${DATA_DIR}/downloader.db"
 MAX_BACKUPS=10
 SKIP_BACKUP=false
 NO_BUILD=false
+CLEAR_DB=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -33,9 +34,13 @@ while [[ $# -gt 0 ]]; do
             NO_BUILD=true
             shift
             ;;
+        --clear-db)
+            CLEAR_DB=true
+            shift
+            ;;
         *)
             echo -e "${RED}Unknown option: $1${NC}"
-            echo "Usage: $0 [--skip-backup] [--no-build]"
+            echo "Usage: $0 [--skip-backup] [--no-build] [--clear-db]"
             exit 1
             ;;
     esac
@@ -116,6 +121,22 @@ fi
 
 echo ""
 
+# Step 2.5: Clear database if requested
+if [[ "$CLEAR_DB" == true ]]; then
+    log_warning "Clearing database (--clear-db flag)..."
+
+    if [[ -f "${DB_FILE}" ]]; then
+        rm -f "${DB_FILE}"
+        log_success "Database file deleted: ${DB_FILE}"
+    else
+        log_info "Database file not found, nothing to delete"
+    fi
+else
+    log_info "Keeping existing database"
+fi
+
+echo ""
+
 # Step 3: Pull latest changes
 log_info "Pulling latest changes from Git..."
 CURRENT_COMMIT=$(git rev-parse HEAD)
@@ -150,7 +171,7 @@ echo ""
 # Step 5: Build new image
 if [[ "$NO_BUILD" == false ]]; then
     log_info "Building new Docker image..."
-    docker compose build --no-cache
+    docker compose build
     log_success "Image built successfully"
 else
     log_warning "Skipping Docker build (--no-build flag)"
@@ -199,10 +220,11 @@ docker compose ps
 
 echo ""
 
-# Step 9: Cleanup old Docker images
-log_info "Cleaning up old Docker images..."
-docker image prune -f
-log_success "Cleanup complete"
+# Step 9: Cleanup old Docker images (disabled to preserve build cache)
+# Uncomment if you want to clean up old images:
+# log_info "Cleaning up old Docker images..."
+# docker image prune -f
+# log_success "Cleanup complete"
 
 echo ""
 

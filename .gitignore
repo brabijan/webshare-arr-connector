@@ -35,7 +35,7 @@ data/*.db
 backups/
 
 # Logs
-logs/*.log
+logs/
 
 # IDE
 .vscode/
