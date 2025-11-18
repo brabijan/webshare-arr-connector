@@ -625,7 +625,7 @@ async function searchUpgrade(event, episode, meta) {
         modalLoading.style.display = 'none';
 
         if (data.success && data.results_count > 0) {
-            renderUpgradeResults(data.results, data.pending_id, data.upgrade_metadata);
+            renderUpgradeResults(data.results, data.pending_id, data.upgrade_metadata, data.current_file);
         } else {
             modalResults.innerHTML = '<p style="text-align: center; color: #999;">No better versions found on Webshare.</p>';
         }
@@ -638,12 +638,43 @@ async function searchUpgrade(event, episode, meta) {
 // Store upgrade metadata globally for use in downloadUpgrade
 let currentUpgradeMetadata = null;
 
-function renderUpgradeResults(results, pendingId, upgradeMetadata) {
+function renderUpgradeResults(results, pendingId, upgradeMetadata, currentFile) {
     const modalResults = document.getElementById('modal-results');
     modalResults.innerHTML = '';
 
     // Store metadata globally
     currentUpgradeMetadata = upgradeMetadata;
+
+    // Display current file information if available
+    if (currentFile) {
+        const currentFileCard = document.createElement('div');
+        currentFileCard.className = 'current-file-card';
+        currentFileCard.style.cssText = 'background: #1f1f1f; border: 2px solid #4a9eff; padding: 15px; margin-bottom: 20px; border-radius: 8px;';
+
+        const audioLangs = Array.isArray(currentFile.audio_languages) ? currentFile.audio_languages.join(', ') : 'N/A';
+        const subLangs = Array.isArray(currentFile.subtitle_languages) ? currentFile.subtitle_languages.join(', ') : 'N/A';
+        const sizeGB = currentFile.size ? (currentFile.size / (1024**3)).toFixed(2) : 'N/A';
+
+        currentFileCard.innerHTML = `
+            <div style="color: #4a9eff; font-weight: bold; margin-bottom: 10px; font-size: 0.9em;">CURRENT FILE:</div>
+            <div style="font-weight: 500; margin-bottom: 10px; color: #fff;">${currentFile.filename || 'N/A'}</div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                ${currentFile.quality ? `<span class="badge badge-quality">${currentFile.quality}</span>` : ''}
+                ${currentFile.codec ? `<span class="badge badge-lang">${currentFile.codec}</span>` : ''}
+                ${currentFile.source ? `<span class="badge badge-lang">${currentFile.source}</span>` : ''}
+                ${audioLangs !== 'N/A' ? `<span class="badge badge-lang">Audio: ${audioLangs}</span>` : ''}
+                ${subLangs !== 'N/A' ? `<span class="badge badge-lang">Subs: ${subLangs}</span>` : ''}
+                ${sizeGB !== 'N/A' ? `<span class="badge badge-size">${sizeGB} GB</span>` : ''}
+            </div>
+        `;
+        modalResults.appendChild(currentFileCard);
+
+        // Add separator
+        const separator = document.createElement('div');
+        separator.style.cssText = 'border-bottom: 1px solid #3a3a3a; margin: 20px 0; padding-bottom: 10px;';
+        separator.innerHTML = '<div style="color: #888; font-weight: 600; font-size: 0.9em;">AVAILABLE UPGRADES:</div>';
+        modalResults.appendChild(separator);
+    }
 
     results.forEach((result, index) => {
         const card = document.createElement('div');

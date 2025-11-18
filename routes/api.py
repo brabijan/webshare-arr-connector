@@ -1428,6 +1428,25 @@ def search_upgrade():
             if not series:
                 return jsonify({'error': 'Series not found'}), 404
 
+            # Get current file metadata
+            current_file_metadata = None
+            if episode_file_id:
+                from services.parser import parse_filename
+                episode_file = sonarr.get_episode_file(episode_file_id)
+                if episode_file:
+                    filename = episode_file.get('relativePath', '').split('/')[-1]
+                    parsed = parse_filename(filename)
+
+                    current_file_metadata = {
+                        'filename': filename,
+                        'quality': parsed.get('screen_size', 'Unknown'),
+                        'codec': parsed.get('video_codec_normalized', 'Unknown'),
+                        'source': parsed.get('source_type_normalized', 'Unknown'),
+                        'audio_languages': parsed.get('audio_languages', []),
+                        'subtitle_languages': parsed.get('subtitle_languages', []),
+                        'size': episode_file.get('size', 0)
+                    }
+
             # Create search query
             item_info = {
                 'source': 'sonarr',
@@ -1471,6 +1490,7 @@ def search_upgrade():
                 'pending_id': pending_id,
                 'results_count': len(results),
                 'results': results,
+                'current_file': current_file_metadata,
                 'upgrade_metadata': {
                     'episode_file_id': episode_file_id,
                     'is_upgrade': True
