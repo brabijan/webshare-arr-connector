@@ -1432,20 +1432,53 @@ def search_upgrade():
             current_file_metadata = None
             if episode_file_id:
                 from services.parser import parse_filename
+                from services.metadata_extractor import extract_video_metadata, format_metadata_for_display
+
                 episode_file = sonarr.get_episode_file(episode_file_id)
                 if episode_file:
                     filename = episode_file.get('relativePath', '').split('/')[-1]
+                    file_path = episode_file.get('path')  # Full path to file
+
+                    # Always parse filename to get source type (ffprobe can't detect this)
                     parsed = parse_filename(filename)
 
-                    current_file_metadata = {
-                        'filename': filename,
-                        'quality': parsed.get('screen_size', 'Unknown'),
-                        'codec': parsed.get('video_codec_normalized', 'Unknown'),
-                        'source': parsed.get('source_type_normalized', 'Unknown'),
-                        'audio_languages': parsed.get('audio_languages', []),
-                        'subtitle_languages': parsed.get('subtitle_languages', []),
-                        'size': episode_file.get('size', 0)
-                    }
+                    def convert_languages(lang_value):
+                        if lang_value is None:
+                            return []
+                        if isinstance(lang_value, list):
+                            return [str(lang) for lang in lang_value]
+                        else:
+                            return [str(lang_value)]
+
+                    # Try to extract real metadata from file
+                    if file_path:
+                        logger.info(f"Extracting metadata from current file: {file_path}")
+                        real_metadata = extract_video_metadata(file_path)
+                        if real_metadata:
+                            formatted = format_metadata_for_display(real_metadata)
+                            current_file_metadata = {
+                                'filename': filename,
+                                'quality': formatted.get('resolution', 'Unknown'),
+                                'codec': formatted.get('video_codec', 'Unknown'),
+                                'source': parsed.get('source_type_normalized', 'Unknown'),  # From filename
+                                'audio_languages': formatted.get('audio_languages', []),
+                                'subtitle_languages': formatted.get('subtitle_languages', []),
+                                'size': episode_file.get('size', 0)
+                            }
+                            logger.info(f"Successfully extracted real metadata from current file (source from filename)")
+
+                    # Fallback to filename parsing if extraction failed
+                    if not current_file_metadata:
+                        logger.warning(f"Falling back to filename parsing for current file: {filename}")
+                        current_file_metadata = {
+                            'filename': filename,
+                            'quality': parsed.get('screen_size', 'Unknown'),
+                            'codec': parsed.get('video_codec_normalized', 'Unknown'),
+                            'source': parsed.get('source_type_normalized', 'Unknown'),
+                            'audio_languages': convert_languages(parsed.get('audio_languages')),
+                            'subtitle_languages': convert_languages(parsed.get('subtitle_languages')),
+                            'size': episode_file.get('size', 0)
+                        }
 
             # Create search query
             item_info = {

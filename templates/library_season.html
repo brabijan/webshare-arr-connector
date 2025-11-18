@@ -683,9 +683,21 @@ function renderUpgradeResults(results, pendingId, upgradeMetadata, currentFile) 
         const parsed = result.parsed || {};
         const score = result.score || {};
 
+        // Check if this is the same file as current
+        const isSameFile = currentFile && result.name === currentFile.filename;
+        const disabledAttr = isSameFile ? 'disabled' : '';
+        const buttonText = isSameFile ? 'Already Downloaded' : 'Download This Upgrade';
+        const alreadyDownloadedBadge = isSameFile ? '<span class="badge" style="background: #ff9800; color: #000; font-weight: 600;">⚠️ ALREADY DOWNLOADED</span>' : '';
+
+        // Add visual indicator if same file
+        if (isSameFile) {
+            card.style.cssText = 'border: 2px solid #ff9800; opacity: 0.7;';
+        }
+
         card.innerHTML = `
             <div class="result-title">${result.name}</div>
             <div class="result-meta">
+                ${alreadyDownloadedBadge}
                 ${parsed.quality ? `<span class="badge badge-quality">${parsed.quality}</span>` : ''}
                 ${parsed.has_czech ? `<span class="badge badge-czech">CZ</span>` : ''}
                 ${parsed.language ? `<span class="badge badge-lang">${parsed.language}</span>` : ''}
@@ -693,7 +705,7 @@ function renderUpgradeResults(results, pendingId, upgradeMetadata, currentFile) 
                 ${result.file_size_gb ? `<span class="badge badge-size">${result.file_size_gb.toFixed(2)} GB</span>` : ''}
                 ${score.total !== undefined ? `<span class="badge badge-score">Score: ${score.total}</span>` : ''}
             </div>
-            <button class="btn" onclick="downloadUpgrade(${pendingId}, ${index})">Download This Upgrade</button>
+            <button class="btn" onclick="downloadUpgrade(${pendingId}, ${index})" ${disabledAttr}>${buttonText}</button>
         `;
 
         modalResults.appendChild(card);
