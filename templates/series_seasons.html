@@ -18,8 +18,14 @@
         <h1 style="margin: 0 0 10px 0;">{{ series.title }}</h1>
         <p style="color: #999; margin: 0 0 20px 0;">{{ series.year }}</p>
         <p style="color: #ccc;">Select a season to view missing episodes</p>
+        <div class="scan-bar">
+            <button id="scan-btn" class="scan-btn" onclick="scanSeries()">🔍 Proskenovat celý seriál</button>
+            <span id="scan-progress" class="scan-progress"></span>
+        </div>
     </div>
 </div>
+
+<div id="scan-results"></div>
 
 <div id="loading" style="display: block; text-align: center; padding: 40px;">
     <p>Loading seasons...</p>
@@ -87,10 +93,40 @@
 }
 </style>
 
+<script src="/static/scan.js"></script>
 <script>
 const seriesId = {{ series.id }};
 const seriesTitle = "{{ series.title }}";
 const seriesPath = "{{ series.path }}";
+
+async function scanSeries() {
+    const btn = document.getElementById('scan-btn');
+    const prog = document.getElementById('scan-progress');
+    const out = document.getElementById('scan-results');
+    btn.disabled = true;
+    btn.textContent = '🔍 Skenuji…';
+    prog.textContent = 'Prohledávám Webshare pro všechny chybějící epizody celého seriálu, může to trvat déle…';
+    out.innerHTML = '';
+    try {
+        const resp = await fetch('/api/scan-series', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ series_id: seriesId })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            prog.textContent = '';
+            WebshareScan.render(out, data);
+        } else {
+            prog.textContent = 'Chyba: ' + (data.error || 'sken selhal');
+        }
+    } catch (e) {
+        prog.textContent = 'Chyba: ' + e.message;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🔍 Proskenovat celý seriál';
+    }
+}
 
 async function loadSeasons() {
     const loading = document.getElementById('loading');

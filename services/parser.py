@@ -1,9 +1,73 @@
 """File parsing and ranking using GuessIt"""
+import re
+import unicodedata
 from guessit import guessit
 import logging
 import config
 
 logger = logging.getLogger(__name__)
+
+# Slova, která pro shodu názvu nic neznamenají
+_TITLE_STOPWORDS = {
+    'the', 'a', 'an', 'of', 'and', 'to', 'in', 'on', 'at', 'for',
+    'i', 'ii', 'iii', 'iv', 'v', 'vi',
+    'season', 'series', 'serie', 'serial', 'serial', 'part', 'episode',
+    'sezona', 'sezóna', 'serie', 'dil', 'díl', 'cast', 'část',
+}
+
+
+def _strip_diacritics(text):
+    """Odstraní diakritiku: 'Tomáš' -> 'Tomas'."""
+    nfkd = unicodedata.normalize('NFKD', text)
+    return ''.join(c for c in nfkd if not unicodedata.combining(c))
+
+
+def _norm_tokens(text):
+    """Rozloží text na normalizovaná slova (bez diakritiky, malá písmena)."""
+    if not text:
+        return []
+    text = _strip_diacritics(str(text)).lower()
+    return [t for t in re.split(r'[^a-z0-9]+', text) if t]
+
+
+def _significant_tokens(title):
+    """Významová slova názvu (bez stopwords a 1písmenných)."""
+    return [
+        t for t in _norm_tokens(title)
+        if len(t) >= 2 and t not in _TITLE_STOPWORDS
+    ]
+
+
+def title_matches(filename, expected_titles, min_ratio=0.6):
+    """Zda název souboru odpovídá aspoň jednomu z očekávaných názvů.
+
+    Porovnává významová slova názvu proti slovům v názvu souboru (bez
+    diakritiky). Jednoslovný název musí být přítomen celý; u víceslovných
+    stačí ``min_ratio`` slov. Tím se odfiltrují nesouvisející trefy
+    (např. „The Last of Us" u „Thomas the Tank Engine").
+    """
+    if not expected_titles:
+        return True
+
+    file_tokens = set(_norm_tokens(filename))
+    if not file_tokens:
+        return False
+
+    had_usable_title = False
+    for title in expected_titles:
+        toks = _significant_tokens(title)
+        if not toks:
+            continue
+        had_usable_title = True
+        matched = sum(1 for t in toks if t in file_tokens)
+        if len(toks) == 1:
+            if matched == 1:
+                return True
+        elif matched / len(toks) >= min_ratio:
+            return True
+
+    # Žádný použitelný název (samé stopwords) → nefiltruj
+    return not had_usable_title
 
 
 def extract_audio_languages(parsed_info):
@@ -240,16 +304,19 @@ def extract_language(parsed_info):
     return languages, has_czech, language_display
 
 
-def rank_result(file_info, parsed_info=None, expected_title=None, expected_season=None, expected_episode=None):
+def rank_result(file_info, parsed_info=None, expected_title=None, expected_season=None, expected_episode=None, expected_titles=None):
     """
     Calculate ranking score for a search result
 
     Args:
         file_info (dict): File information from Webshare
         parsed_info (dict, optional): Pre-parsed GuessIt info
-        expected_title (str, optional): Expected series/movie title
+        expected_title (str, optional): Expected series/movie title (legacy)
         expected_season (int, optional): Expected season number
         expected_episode (int, optional): Expected episode number
+        expected_titles (list, optional): Přijatelné názvy (anglický +
+            český/vlastní). Pokud název souboru neodpovídá ani jednomu,
+            výsledek se diskvalifikuje.
 
     Returns:
         dict: File info with added ranking fields
@@ -271,27 +338,30 @@ def rank_result(file_info, parsed_info=None, expected_title=None, expected_seaso
 
     # CRITICAL: Check if this matches expected title/season/episode
     title_match_bonus = 0
-    parsed_title = str(parsed_info.get('title', '')).lower()
     parsed_season = parsed_info.get('season')
     parsed_episode = parsed_info.get('episode')
+
+    # Seznam přijatelných názvů (nový styl má přednost před legacy)
+    titles = expected_titles or ([expected_title] if expected_title else [])
+
+    # Název MUSÍ odpovídat – jinak diskvalifikace (řeší "The Last of Us"
+    # ve výsledcích pro "Thomas the Tank Engine")
+    title_ok = title_matches(filename, titles) if titles else True
+    if titles and not title_ok:
+        total_score = -1000
+    elif titles:
+        title_match_bonus += 50
 
     # For TV shows, season/episode MUST match
     if expected_season is not None and expected_episode is not None:
         if parsed_season == expected_season and parsed_episode == expected_episode:
-            title_match_bonus = 200  # HUGE bonus for exact match
+            title_match_bonus += 200  # HUGE bonus for exact match
         else:
             # Wrong season/episode = disqualify
             total_score = -1000
 
-    # Title matching (loose)
-    if expected_title:
-        expected_title_lower = expected_title.lower().replace('the ', '').replace(' ', '')
-        parsed_title_clean = parsed_title.replace('the ', '').replace(' ', '')
-
-        if expected_title_lower in parsed_title_clean or parsed_title_clean in expected_title_lower:
-            title_match_bonus += 50
-
-    total_score += title_match_bonus
+    if total_score > -1000:
+        total_score += title_match_bonus
 
     # Add language bonus
     if config.PREFER_CZECH and has_czech:
@@ -342,16 +412,18 @@ def rank_result(file_info, parsed_info=None, expected_title=None, expected_seaso
     }
 
 
-def rank_results(results, min_results=5, expected_title=None, expected_season=None, expected_episode=None):
+def rank_results(results, min_results=5, expected_title=None, expected_season=None, expected_episode=None, expected_titles=None):
     """
     Rank multiple search results
 
     Args:
         results (list): List of file info dictionaries
         min_results (int): Minimum number of results to return
-        expected_title (str, optional): Expected title for matching
+        expected_title (str, optional): Expected title for matching (legacy)
         expected_season (int, optional): Expected season for matching
         expected_episode (int, optional): Expected episode for matching
+        expected_titles (list, optional): Přijatelné názvy (anglický +
+            český/vlastní); nesedící se diskvalifikují
 
     Returns:
         list: Ranked and enriched results
@@ -369,7 +441,8 @@ def rank_results(results, min_results=5, expected_title=None, expected_season=No
                 result,
                 expected_title=expected_title,
                 expected_season=expected_season,
-                expected_episode=expected_episode
+                expected_episode=expected_episode,
+                expected_titles=expected_titles
             )
             ranked.append(ranked_result)
         except Exception as e:

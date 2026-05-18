@@ -191,7 +191,9 @@ def init_db():
     engine = create_engine(
         f'sqlite:///{config.DATABASE_PATH}',
         echo=config.DEBUG,
-        connect_args={'check_same_thread': False}
+        # timeout = jak dlouho čekat na zamčenou DB (paralelní sken píše
+        # z více vláken najednou) – brání chybám "database is locked"
+        connect_args={'check_same_thread': False, 'timeout': 30}
     )
 
     # Create tables

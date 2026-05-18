@@ -25,4 +25,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:5050/health', timeout=5)"
 
 # Run with gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:5050", "--workers", "2", "--timeout", "120", "--log-level", "info", "app:app"]
+# --timeout 900: sken celého seriálu může běžet i pár minut
+CMD ["gunicorn", "--bind", "0.0.0.0:5050", "--workers", "2", "--timeout", "900", "--log-level", "info", "app:app"]

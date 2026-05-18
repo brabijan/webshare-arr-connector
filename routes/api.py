@@ -903,6 +903,55 @@ def search_movie():
         return jsonify({'error': str(e)}), 500
 
 
+@api_bp.route('/scan-season', methods=['POST'])
+def scan_season():
+    """Proskenuje Webshare pro všechny chybějící epizody jedné sezóny.
+
+    POST body: {series_id, season, series_title?, series_path?}
+    Vrací epizody s funkčními výsledky (mrtvé/nesedící odfiltrované).
+    """
+    try:
+        data = request.json or {}
+        series_id = data.get('series_id')
+        season = data.get('season')
+
+        if series_id is None or season is None:
+            return jsonify({'error': 'series_id a season jsou povinné'}), 400
+
+        result = search.scan_season(
+            series_id, season,
+            series_title=data.get('series_title'),
+            series_path=data.get('series_path'),
+        )
+        return jsonify(result), 200
+
+    except Exception as e:
+        logger.error(f"Error scanning season: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/scan-series', methods=['POST'])
+def scan_series():
+    """Proskenuje Webshare pro všechny chybějící epizody celého seriálu.
+
+    POST body: {series_id}
+    """
+    try:
+        data = request.json or {}
+        series_id = data.get('series_id')
+
+        if series_id is None:
+            return jsonify({'error': 'series_id je povinné'}), 400
+
+        result = search.scan_series(series_id)
+        status = 200 if result.get('success') else 404
+        return jsonify(result), status
+
+    except Exception as e:
+        logger.error(f"Error scanning series: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @api_bp.route('/download-status', methods=['GET'])
 def get_download_status():
     """

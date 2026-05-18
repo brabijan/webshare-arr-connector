@@ -18,9 +18,15 @@
         <h1 style="margin: 0 0 10px 0;">{{ series.title }}</h1>
         <h2 style="margin: 0 0 10px 0; color: #999;">Season {{ season_number }}</h2>
         <p style="color: #ccc;">Click "Search Webshare" to find downloads for an episode</p>
+        <div class="scan-bar">
+            <button id="scan-btn" class="scan-btn" onclick="scanSeason()">🔍 Proskenovat sezónu</button>
+            <span id="scan-progress" class="scan-progress"></span>
+        </div>
         <button id="alias-toggle" class="btn btn-secondary" onclick="toggleAliasPanel()">🔎 Vyhledávací název</button>
     </div>
 </div>
+
+<div id="scan-results"></div>
 
 <!-- Panel: vyhledávací název seriálu -->
 <div id="alias-panel" class="alias-panel" style="display: none;">
@@ -412,11 +418,46 @@
 }
 </style>
 
+<script src="/static/scan.js"></script>
 <script>
 const seriesId = {{ series.id }};
 const seriesTitle = "{{ series.title }}";
 const seriesPath = "{{ series.path }}";
 const seasonNumber = {{ season_number }};
+
+async function scanSeason() {
+    const btn = document.getElementById('scan-btn');
+    const prog = document.getElementById('scan-progress');
+    const out = document.getElementById('scan-results');
+    btn.disabled = true;
+    btn.textContent = '🔍 Skenuji…';
+    prog.textContent = 'Prohledávám Webshare pro všechny chybějící epizody, může to chvíli trvat…';
+    out.innerHTML = '';
+    try {
+        const resp = await fetch('/api/scan-season', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                series_id: seriesId,
+                season: seasonNumber,
+                series_title: seriesTitle,
+                series_path: seriesPath
+            })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            prog.textContent = '';
+            WebshareScan.render(out, data);
+        } else {
+            prog.textContent = 'Chyba: ' + (data.error || 'sken selhal');
+        }
+    } catch (e) {
+        prog.textContent = 'Chyba: ' + e.message;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🔍 Proskenovat sezónu';
+    }
+}
 
 let currentEpisode = null;
 let currentPendingId = null;

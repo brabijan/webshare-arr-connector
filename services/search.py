@@ -185,17 +185,29 @@ def search_for_item(item_info, top_n=5):
     expected_season = item_info.get('season')
     expected_episode = item_info.get('episode')
 
-    # Rank results with expected values
+    # Přijatelné názvy = původní + vlastní/český (kvůli filtru nesedících)
+    expected_titles = []
+    for t in [expected_title, *(item_info.get('extra_titles') or [])]:
+        if t and t not in expected_titles:
+            expected_titles.append(t)
+
+    # Rank results with expected values (nesedící názvy se diskvalifikují)
     ranked = parser.rank_results(
         all_results,
         min_results=top_n,
-        expected_title=expected_title,
         expected_season=expected_season,
-        expected_episode=expected_episode
+        expected_episode=expected_episode,
+        expected_titles=expected_titles
     )
 
-    # Return top N
-    return ranked[:top_n]
+    if not ranked:
+        return []
+
+    # Zahoď soubory bez funkčního odkazu (FATAL/mrtvé na Webshare),
+    # ať se uživateli nezobrazují vůbec
+    ws_client = webshare.get_client()
+    available = ws_client.filter_available(ranked, want=top_n)
+    return available
 
 
 def create_pending_confirmation(item_info, search_results):
@@ -250,6 +262,152 @@ def create_pending_confirmation(item_info, search_results):
         return None
     finally:
         db.close()
+
+
+def _scan_episode(series_id, series_title, series_path, season, episode_meta,
+                  top_n=8):
+    """Prohledá jednu epizodu, vrátí dict s funkčními výsledky.
+
+    U epizody s aspoň jedním výsledkem založí pending confirmation, aby
+    šlo stáhnout přes /api/confirm.
+    """
+    ep_num = episode_meta.get('episodeNumber')
+    item_info = {
+        'source': 'sonarr',
+        'series_id': series_id,
+        'series_title': series_title,
+        'season': season,
+        'episode': ep_num,
+    }
+
+    try:
+        results = search_for_item(item_info, top_n=top_n)
+    except Exception as e:
+        logger.warning(
+            f"Sken S{season:02d}E{ep_num or 0:02d} selhal: {e}"
+        )
+        results = []
+
+    pending_id = None
+    if results:
+        pending_id = create_pending_confirmation(item_info, results)
+        if pending_id and series_path:
+            db = get_db_session()
+            try:
+                pending = db.query(PendingConfirmation).filter(
+                    PendingConfirmation.id == pending_id
+                ).first()
+                if pending:
+                    pending.destination_path = series_path
+                    db.commit()
+            finally:
+                db.close()
+
+    return {
+        'episode_number': ep_num,
+        'title': episode_meta.get('title'),
+        'air_date': episode_meta.get('airDate'),
+        'pending_id': pending_id,
+        'results_count': len(results),
+        'results': results,
+    }
+
+
+def _scan_episodes_parallel(series_id, series_title, series_path, season,
+                            episodes_meta, top_n, max_workers=5):
+    """Proskenuje epizody paralelně (síťově náročné), zachová pořadí."""
+    if not episodes_meta:
+        return []
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    workers = max(1, min(max_workers, len(episodes_meta)))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        return list(ex.map(
+            lambda em: _scan_episode(
+                series_id, series_title, series_path, season, em, top_n
+            ),
+            episodes_meta
+        ))
+
+
+def scan_season(series_id, season, series_title=None, series_path=None,
+                top_n=8):
+    """Proskenuje všechny chybějící epizody jedné sezóny.
+
+    Returns:
+        dict: {success, series_id, season, episodes:[...]}
+    """
+    sonarr_client = sonarr.get_client()
+    if not series_title or not series_path:
+        series = sonarr_client.get_series_by_id(series_id)
+        if series:
+            series_title = series_title or series.get('title')
+            series_path = series_path or series.get('path')
+
+    seasons = sonarr_client.get_series_missing_episodes(series_id)
+    episodes_meta = sorted(
+        seasons.get(season, []),
+        key=lambda e: e.get('episodeNumber') or 0
+    )
+
+    logger.info(
+        f"Sken sezóny: {series_title} S{season:02d} "
+        f"({len(episodes_meta)} chybějících epizod)"
+    )
+
+    episodes = _scan_episodes_parallel(
+        series_id, series_title, series_path, season, episodes_meta, top_n
+    )
+
+    return {
+        'success': True,
+        'series_id': series_id,
+        'series_title': series_title,
+        'season': season,
+        'episodes': episodes,
+    }
+
+
+def scan_series(series_id, top_n=8):
+    """Proskenuje všechny chybějící epizody napříč všemi sezónami seriálu.
+
+    Returns:
+        dict: {success, series_id, series_title, seasons:[{season, episodes}]}
+    """
+    sonarr_client = sonarr.get_client()
+    series = sonarr_client.get_series_by_id(series_id)
+    if not series:
+        return {'success': False, 'error': 'Series not found'}
+
+    series_title = series.get('title')
+    series_path = series.get('path')
+
+    seasons_dict = sonarr_client.get_series_missing_episodes(series_id)
+
+    logger.info(
+        f"Sken celého seriálu: {series_title} "
+        f"({len(seasons_dict)} sezón s chybějícími epizodami)"
+    )
+
+    seasons = []
+    for season_num in sorted(seasons_dict):
+        episodes_meta = sorted(
+            seasons_dict[season_num],
+            key=lambda e: e.get('episodeNumber') or 0
+        )
+        episodes = _scan_episodes_parallel(
+            series_id, series_title, series_path,
+            season_num, episodes_meta, top_n
+        )
+        seasons.append({'season': season_num, 'episodes': episodes})
+
+    return {
+        'success': True,
+        'series_id': series_id,
+        'series_title': series_title,
+        'seasons': seasons,
+    }
 
 
 def search_missing_items(source='sonarr', limit=10):
