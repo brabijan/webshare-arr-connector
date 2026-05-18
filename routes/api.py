@@ -1,6 +1,7 @@
 """REST API endpoints"""
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response, stream_with_context
 from datetime import datetime
+import json
 import logging
 from models.database import PendingConfirmation, DownloadHistory, get_db_session
 from services import webshare, pyload, search
@@ -950,6 +951,58 @@ def scan_series():
     except Exception as e:
         logger.error(f"Error scanning series: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
+
+
+def _sse(event_iter):
+    """Zabalí generátor událostí do Server-Sent Events streamu."""
+    def gen():
+        try:
+            for ev in event_iter:
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.error(f"Scan stream selhal: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+
+    return Response(
+        stream_with_context(gen()),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',  # nevyrovnávat (reverzní proxy)
+            'Connection': 'keep-alive',
+        },
+    )
+
+
+@api_bp.route('/scan-season-stream', methods=['GET'])
+def scan_season_stream():
+    """SSE: průběžný sken jedné sezóny (pro progress bar).
+
+    Query: series_id, season, series_title?, series_path?
+    """
+    series_id = request.args.get('series_id', type=int)
+    season = request.args.get('season', type=int)
+    if series_id is None or season is None:
+        return jsonify({'error': 'series_id a season jsou povinné'}), 400
+
+    return _sse(search.iter_scan_season(
+        series_id, season,
+        series_title=request.args.get('series_title'),
+        series_path=request.args.get('series_path'),
+    ))
+
+
+@api_bp.route('/scan-series-stream', methods=['GET'])
+def scan_series_stream():
+    """SSE: průběžný sken celého seriálu (pro progress bar).
+
+    Query: series_id
+    """
+    series_id = request.args.get('series_id', type=int)
+    if series_id is None:
+        return jsonify({'error': 'series_id je povinné'}), 400
+
+    return _sse(search.iter_scan_series(series_id))
 
 
 @api_bp.route('/download-status', methods=['GET'])

@@ -425,38 +425,20 @@ const seriesTitle = "{{ series.title }}";
 const seriesPath = "{{ series.path }}";
 const seasonNumber = {{ season_number }};
 
-async function scanSeason() {
+function scanSeason() {
     const btn = document.getElementById('scan-btn');
     const prog = document.getElementById('scan-progress');
     const out = document.getElementById('scan-results');
     btn.disabled = true;
     btn.textContent = '🔍 Skenuji…';
-    prog.textContent = 'Prohledávám Webshare pro všechny chybějící epizody, může to chvíli trvat…';
-    out.innerHTML = '';
-    try {
-        const resp = await fetch('/api/scan-season', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                series_id: seriesId,
-                season: seasonNumber,
-                series_title: seriesTitle,
-                series_path: seriesPath
-            })
-        });
-        const data = await resp.json();
-        if (data.success) {
-            prog.textContent = '';
-            WebshareScan.render(out, data);
-        } else {
-            prog.textContent = 'Chyba: ' + (data.error || 'sken selhal');
-        }
-    } catch (e) {
-        prog.textContent = 'Chyba: ' + e.message;
-    } finally {
+    prog.textContent = '';
+    const url = `/api/scan-season-stream?series_id=${seriesId}&season=${seasonNumber}`
+        + `&series_title=${encodeURIComponent(seriesTitle)}`
+        + `&series_path=${encodeURIComponent(seriesPath)}`;
+    WebshareScan.stream(url, out, () => {
         btn.disabled = false;
         btn.textContent = '🔍 Proskenovat sezónu';
-    }
+    });
 }
 
 let currentEpisode = null;

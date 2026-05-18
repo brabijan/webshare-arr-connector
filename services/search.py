@@ -3,8 +3,8 @@ import logging
 import re
 from datetime import datetime, timedelta
 from models.database import (
-    SearchCache, PendingConfirmation, SearchAlias, get_or_create_alias,
-    get_db_session,
+    SearchCache, PendingConfirmation, SearchAlias, DownloadHistory,
+    get_or_create_alias, get_db_session,
 )
 from services import webshare, parser, sonarr, radarr, csfd
 
@@ -142,8 +142,11 @@ def search_for_item(item_info, top_n=5):
     """
     source = item_info.get('source')
 
-    # Doplň vlastní / český (ČSFD) název pro hledání
-    if not item_info.get('extra_titles'):
+    # Doplň vlastní / český (ČSFD) název pro hledání.
+    # Kontroluje se přítomnost klíče (ne pravdivost) – při skenu se
+    # extra_titles předvyplní jednou na seriál (i prázdné), aby paralelní
+    # epizody nezávodily o vytvoření alias řádku v DB.
+    if 'extra_titles' not in item_info:
         item_info['extra_titles'] = resolve_extra_titles(item_info)
 
     # Generate queries
@@ -265,11 +268,12 @@ def create_pending_confirmation(item_info, search_results):
 
 
 def _scan_episode(series_id, series_title, series_path, season, episode_meta,
-                  top_n=8):
+                  top_n=8, extra_titles=None):
     """Prohledá jednu epizodu, vrátí dict s funkčními výsledky.
 
     U epizody s aspoň jedním výsledkem založí pending confirmation, aby
-    šlo stáhnout přes /api/confirm.
+    šlo stáhnout přes /api/confirm. ``extra_titles`` (vlastní/český název)
+    se předává předvyřešené – jednou na celý seriál.
     """
     ep_num = episode_meta.get('episodeNumber')
     item_info = {
@@ -278,6 +282,9 @@ def _scan_episode(series_id, series_title, series_path, season, episode_meta,
         'series_title': series_title,
         'season': season,
         'episode': ep_num,
+        # vždy nastav klíč (i []), aby search_for_item nevolal
+        # resolve_extra_titles paralelně z více vláken
+        'extra_titles': list(extra_titles or []),
     }
 
     try:
@@ -313,99 +320,244 @@ def _scan_episode(series_id, series_title, series_path, season, episode_meta,
     }
 
 
-def _scan_episodes_parallel(series_id, series_title, series_path, season,
-                            episodes_meta, top_n, max_workers=5):
-    """Proskenuje epizody paralelně (síťově náročné), zachová pořadí."""
-    if not episodes_meta:
+def _already_sent_episodes(series_id):
+    """Množina (season, episode), které už byly odeslány do pyLoad.
+
+    Sonarr je hlásí jako chybějící, dokud soubor nenaimportuje, ale my je
+    nechceme znovu nabízet ke stažení.
+    """
+    db = get_db_session()
+    try:
+        rows = db.query(
+            DownloadHistory.season, DownloadHistory.episode
+        ).filter(
+            DownloadHistory.source == 'sonarr',
+            DownloadHistory.source_id == series_id,
+            DownloadHistory.status == 'sent',
+        ).all()
+        return {(s, e) for s, e in rows if s is not None and e is not None}
+    except Exception as e:
+        logger.warning(f"Nelze zjistit odeslané epizody: {e}")
+        return set()
+    finally:
+        db.close()
+
+
+def _filter_not_sent(episodes_meta, season, already_sent):
+    """Vyřadí epizody, které už jsou odeslané do pyLoad."""
+    return [
+        em for em in episodes_meta
+        if (season, em.get('episodeNumber')) not in already_sent
+    ]
+
+
+def _resolve_series_titles(series_id, series_title, series_year):
+    """Vyřeší vlastní/český název JEDNOU na celý seriál.
+
+    Předejde tomu, aby paralelní epizody závodily o vytvoření alias
+    řádku v DB (UNIQUE constraint), a ušetří opakované ČSFD dotazy.
+    """
+    try:
+        return resolve_extra_titles({
+            'source': 'sonarr',
+            'series_id': series_id,
+            'series_title': series_title,
+            'series_year': series_year,
+        })
+    except Exception as e:
+        logger.warning(f"Předvyřešení názvů pro sken selhalo: {e}")
         return []
 
-    from concurrent.futures import ThreadPoolExecutor
 
-    workers = max(1, min(max_workers, len(episodes_meta)))
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        return list(ex.map(
-            lambda em: _scan_episode(
-                series_id, series_title, series_path, season, em, top_n
-            ),
-            episodes_meta
-        ))
+def _iter_scan(series_id, series_title, series_path, seasons_meta, top_n,
+               extra_titles=None, max_workers=5):
+    """Generátor průběhu skenu – streamuje události pro progress bar.
 
+    seasons_meta: list[(season_num, [episode_meta, …])]
 
-def scan_season(series_id, season, series_title=None, series_path=None,
-                top_n=8):
-    """Proskenuje všechny chybějící epizody jedné sezóny.
-
-    Returns:
-        dict: {success, series_id, season, episodes:[...]}
+    Postupně yielduje:
+      {'type':'start', total, seasons:[outline]}
+      {'type':'episode', season, done, total, episode:{…}}
+      {'type':'done', total}
+    Epizody se v rámci sezóny skenují paralelně a posílají se hned,
+    jak jsou hotové (proto pořadí není zaručené – UI plní podle čísla).
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    outline = []
+    total = 0
+    for sn, eps in seasons_meta:
+        outline.append({
+            'season': sn,
+            'episodes': [
+                {'episode_number': e.get('episodeNumber'),
+                 'title': e.get('title')}
+                for e in eps
+            ],
+        })
+        total += len(eps)
+
+    yield {
+        'type': 'start',
+        'series_id': series_id,
+        'series_title': series_title,
+        'total': total,
+        'seasons': outline,
+    }
+
+    done = 0
+    for sn, eps in seasons_meta:
+        if not eps:
+            continue
+        workers = max(1, min(max_workers, len(eps)))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = {
+                ex.submit(_scan_episode, series_id, series_title,
+                          series_path, sn, em, top_n, extra_titles): em
+                for em in eps
+            }
+            for fut in as_completed(futs):
+                try:
+                    ep = fut.result()
+                except Exception as e:
+                    em = futs[fut]
+                    logger.warning(f"Sken epizody selhal: {e}")
+                    ep = {
+                        'episode_number': em.get('episodeNumber'),
+                        'title': em.get('title'),
+                        'air_date': em.get('airDate'),
+                        'pending_id': None,
+                        'results_count': 0,
+                        'results': [],
+                    }
+                done += 1
+                yield {
+                    'type': 'episode',
+                    'season': sn,
+                    'done': done,
+                    'total': total,
+                    'episode': ep,
+                }
+
+    yield {
+        'type': 'done',
+        'series_id': series_id,
+        'series_title': series_title,
+        'total': total,
+    }
+
+
+def iter_scan_season(series_id, season, series_title=None, series_path=None,
+                     top_n=8):
+    """Generátor: sken jedné sezóny (viz _iter_scan)."""
     sonarr_client = sonarr.get_client()
-    if not series_title or not series_path:
-        series = sonarr_client.get_series_by_id(series_id)
-        if series:
-            series_title = series_title or series.get('title')
-            series_path = series_path or series.get('path')
+    series = sonarr_client.get_series_by_id(series_id)
+    if series:
+        series_title = series_title or series.get('title')
+        series_path = series_path or series.get('path')
+    series_year = series.get('year') if series else None
 
     seasons = sonarr_client.get_series_missing_episodes(series_id)
     episodes_meta = sorted(
         seasons.get(season, []),
         key=lambda e: e.get('episodeNumber') or 0
     )
-
+    episodes_meta = _filter_not_sent(
+        episodes_meta, season, _already_sent_episodes(series_id)
+    )
     logger.info(
         f"Sken sezóny: {series_title} S{season:02d} "
-        f"({len(episodes_meta)} chybějících epizod)"
+        f"({len(episodes_meta)} chybějících epizod, bez už odeslaných)"
+    )
+    extra_titles = _resolve_series_titles(series_id, series_title, series_year)
+    yield from _iter_scan(
+        series_id, series_title, series_path,
+        [(season, episodes_meta)], top_n, extra_titles
     )
 
-    episodes = _scan_episodes_parallel(
-        series_id, series_title, series_path, season, episodes_meta, top_n
+
+def iter_scan_series(series_id, top_n=8):
+    """Generátor: sken celého seriálu (viz _iter_scan)."""
+    sonarr_client = sonarr.get_client()
+    series = sonarr_client.get_series_by_id(series_id)
+    if not series:
+        yield {'type': 'error', 'error': 'Series not found'}
+        return
+
+    series_title = series.get('title')
+    series_path = series.get('path')
+    series_year = series.get('year')
+    seasons_dict = sonarr_client.get_series_missing_episodes(series_id)
+    already_sent = _already_sent_episodes(series_id)
+    seasons_meta = []
+    for sn in sorted(seasons_dict):
+        eps = sorted(seasons_dict[sn], key=lambda e: e.get('episodeNumber') or 0)
+        eps = _filter_not_sent(eps, sn, already_sent)
+        if eps:
+            seasons_meta.append((sn, eps))
+    logger.info(
+        f"Sken celého seriálu: {series_title} "
+        f"({len(seasons_dict)} sezón s chybějícími epizodami)"
+    )
+    extra_titles = _resolve_series_titles(series_id, series_title, series_year)
+    yield from _iter_scan(
+        series_id, series_title, series_path, seasons_meta, top_n,
+        extra_titles
     )
 
+
+def scan_season(series_id, season, series_title=None, series_path=None,
+                top_n=8):
+    """Proskenuje všechny chybějící epizody jedné sezóny (neproudově).
+
+    Returns:
+        dict: {success, series_id, season, episodes:[...]}
+    """
+    episodes = []
+    out_title = series_title
+    for ev in iter_scan_season(series_id, season, series_title,
+                               series_path, top_n):
+        if ev['type'] == 'start':
+            out_title = ev.get('series_title') or out_title
+        elif ev['type'] == 'episode':
+            episodes.append(ev['episode'])
+
+    episodes.sort(key=lambda e: e.get('episode_number') or 0)
     return {
         'success': True,
         'series_id': series_id,
-        'series_title': series_title,
+        'series_title': out_title,
         'season': season,
         'episodes': episodes,
     }
 
 
 def scan_series(series_id, top_n=8):
-    """Proskenuje všechny chybějící epizody napříč všemi sezónami seriálu.
+    """Proskenuje všechny chybějící epizody celého seriálu (neproudově).
 
     Returns:
         dict: {success, series_id, series_title, seasons:[{season, episodes}]}
     """
-    sonarr_client = sonarr.get_client()
-    series = sonarr_client.get_series_by_id(series_id)
-    if not series:
-        return {'success': False, 'error': 'Series not found'}
-
-    series_title = series.get('title')
-    series_path = series.get('path')
-
-    seasons_dict = sonarr_client.get_series_missing_episodes(series_id)
-
-    logger.info(
-        f"Sken celého seriálu: {series_title} "
-        f"({len(seasons_dict)} sezón s chybějícími epizodami)"
-    )
+    out_title = None
+    eps_by_season = {}
+    for ev in iter_scan_series(series_id, top_n):
+        if ev['type'] == 'error':
+            return {'success': False, 'error': ev.get('error')}
+        if ev['type'] == 'start':
+            out_title = ev.get('series_title')
+        elif ev['type'] == 'episode':
+            eps_by_season.setdefault(ev['season'], []).append(ev['episode'])
 
     seasons = []
-    for season_num in sorted(seasons_dict):
-        episodes_meta = sorted(
-            seasons_dict[season_num],
-            key=lambda e: e.get('episodeNumber') or 0
-        )
-        episodes = _scan_episodes_parallel(
-            series_id, series_title, series_path,
-            season_num, episodes_meta, top_n
-        )
-        seasons.append({'season': season_num, 'episodes': episodes})
+    for season_num in sorted(eps_by_season):
+        eps = sorted(eps_by_season[season_num],
+                     key=lambda e: e.get('episode_number') or 0)
+        seasons.append({'season': season_num, 'episodes': eps})
 
     return {
         'success': True,
         'series_id': series_id,
-        'series_title': series_title,
+        'series_title': out_title,
         'seasons': seasons,
     }
 
