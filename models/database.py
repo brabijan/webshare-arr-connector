@@ -1,6 +1,6 @@
 """Database models for Webshare Downloader"""
 from datetime import datetime, timedelta
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, Float
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, Float, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import json
@@ -121,6 +121,62 @@ class PendingConfirmation(Base):
         if self.episode is not None:
             return f"<PendingConfirmation {self.item_title} S{self.season:02d}E{self.episode:02d}>"
         return f"<PendingConfirmation {self.item_title} ({self.year})>"
+
+
+class SearchAlias(Base):
+    """Vlastní / český vyhledávací název pro seriál nebo film.
+
+    Jeden záznam na (source, source_id). `custom_title` zadává uživatel
+    ručně, `auto_title` se dohledává automaticky z ČSFD.
+    """
+    __tablename__ = 'search_aliases'
+    __table_args__ = (
+        UniqueConstraint('source', 'source_id', name='uq_alias_source'),
+    )
+
+    id = Column(Integer, primary_key=True)
+    source = Column(String(20), nullable=False)  # 'sonarr' / 'radarr'
+    source_id = Column(Integer, nullable=False)  # series_id / movie_id
+
+    custom_title = Column(String(500), nullable=True)  # ruční přepis uživatele
+    auto_title = Column(String(500), nullable=True)    # dohledáno z ČSFD
+    auto_checked_at = Column(DateTime, nullable=True)  # kdy se ČSFD naposledy ptalo
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def effective_titles(self):
+        """Pořadí vyhledávacích názvů navíc (vlastní má přednost)."""
+        titles = []
+        for t in (self.custom_title, self.auto_title):
+            if t and t.strip() and t.strip() not in titles:
+                titles.append(t.strip())
+        return titles
+
+    def __repr__(self):
+        return (
+            f"<SearchAlias {self.source}#{self.source_id} "
+            f"custom={self.custom_title!r} auto={self.auto_title!r}>"
+        )
+
+
+def get_alias(db, source, source_id):
+    """Vrátí SearchAlias pro daný zdroj/id nebo None."""
+    if source_id is None:
+        return None
+    return db.query(SearchAlias).filter(
+        SearchAlias.source == source,
+        SearchAlias.source_id == source_id
+    ).first()
+
+
+def get_or_create_alias(db, source, source_id):
+    """Vrátí existující alias, nebo vytvoří nový (necommituje)."""
+    alias = get_alias(db, source, source_id)
+    if alias is None:
+        alias = SearchAlias(source=source, source_id=source_id)
+        db.add(alias)
+    return alias
 
 
 # Database engine and session

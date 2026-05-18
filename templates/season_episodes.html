@@ -18,7 +18,39 @@
         <h1 style="margin: 0 0 10px 0;">{{ series.title }}</h1>
         <h2 style="margin: 0 0 10px 0; color: #999;">Season {{ season_number }}</h2>
         <p style="color: #ccc;">Click "Search Webshare" to find downloads for an episode</p>
+        <button id="alias-toggle" class="btn btn-secondary" onclick="toggleAliasPanel()">🔎 Vyhledávací název</button>
     </div>
+</div>
+
+<!-- Panel: vyhledávací název seriálu -->
+<div id="alias-panel" class="alias-panel" style="display: none;">
+    <h3 style="margin-top: 0;">Vyhledávací název pro Webshare</h3>
+    <p class="alias-hint">
+        Sonarr zná tenhle seriál pod anglickým názvem, ale na Webshare bývá
+        český obsah pod českým názvem. Zadej vlastní název (např.
+        <em>Lokomotiva Tomáš</em>), nebo si nech dohledat český název z ČSFD.
+        Hledá se pak <strong>navíc</strong> k původnímu názvu – o anglické
+        výsledky tím nepřijdeš.
+    </p>
+
+    <div class="alias-row">
+        <span class="alias-label">Původní (Sonarr):</span>
+        <span id="alias-original" class="alias-value">–</span>
+    </div>
+    <div class="alias-row">
+        <span class="alias-label">Český (ČSFD):</span>
+        <span id="alias-auto" class="alias-value">–</span>
+        <button class="btn btn-small" onclick="detectAlias()" id="alias-detect-btn">Dohledat z ČSFD</button>
+    </div>
+
+    <div id="alias-chips" class="alias-chips"></div>
+
+    <div class="alias-input-row">
+        <input type="text" id="alias-input" class="alias-input"
+               placeholder="Vlastní vyhledávací název (volitelné)…"/>
+        <button class="btn" onclick="saveAlias()" id="alias-save-btn">Uložit</button>
+    </div>
+    <div id="alias-status" class="alias-status"></div>
 </div>
 
 <div id="loading" style="display: block; text-align: center; padding: 40px;">
@@ -115,6 +147,115 @@
     background: #666;
     cursor: not-allowed;
 }
+
+.btn-secondary {
+    background: #333;
+    margin-top: 8px;
+}
+
+.btn-secondary:hover {
+    background: #444;
+}
+
+.btn-small {
+    padding: 6px 12px;
+    font-size: 13px;
+}
+
+/* Alias panel */
+.alias-panel {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-left: 4px solid #4CAF50;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 30px;
+}
+
+.alias-hint {
+    color: #aaa;
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 16px;
+}
+
+.alias-hint em {
+    color: #FF9800;
+    font-style: normal;
+}
+
+.alias-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.alias-label {
+    color: #4CAF50;
+    font-weight: bold;
+    min-width: 130px;
+}
+
+.alias-value {
+    color: #fff;
+}
+
+.alias-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.alias-chip {
+    background: #2a2a2a;
+    border: 1px solid #444;
+    color: #ddd;
+    padding: 5px 12px;
+    border-radius: 14px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.alias-chip:hover {
+    background: #4CAF50;
+    color: #fff;
+    border-color: #4CAF50;
+}
+
+.alias-input-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.alias-input {
+    flex: 1;
+    padding: 10px 12px;
+    background: #0f0f0f;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #fff;
+    font-size: 14px;
+}
+
+.alias-input:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
+.alias-status {
+    margin-top: 10px;
+    font-size: 13px;
+    min-height: 18px;
+}
+
+.alias-status.ok { color: #4CAF50; }
+.alias-status.err { color: #f44336; }
+.alias-status.busy { color: #999; }
 
 .empty-state {
     text-align: center;
@@ -280,6 +421,110 @@ const seasonNumber = {{ season_number }};
 let currentEpisode = null;
 let currentPendingId = null;
 let downloadedEpisodes = new Set(); // Set of "S01E01" strings
+let aliasLoaded = false;
+
+// ===== Vyhledávací název (alias) =====
+function toggleAliasPanel() {
+    const panel = document.getElementById('alias-panel');
+    const visible = panel.style.display !== 'none';
+    panel.style.display = visible ? 'none' : 'block';
+    if (!visible && !aliasLoaded) {
+        loadAlias();
+    }
+}
+
+function setAliasStatus(msg, cls) {
+    const el = document.getElementById('alias-status');
+    el.textContent = msg || '';
+    el.className = 'alias-status' + (cls ? ' ' + cls : '');
+}
+
+function renderAliasChips(data, candidates) {
+    const wrap = document.getElementById('alias-chips');
+    wrap.innerHTML = '';
+    const seen = new Set();
+    const add = (label) => {
+        if (!label) return;
+        const key = label.trim().toLowerCase();
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        const chip = document.createElement('span');
+        chip.className = 'alias-chip';
+        chip.textContent = label;
+        chip.title = 'Vyplnit do pole';
+        chip.onclick = () => { document.getElementById('alias-input').value = label; };
+        wrap.appendChild(chip);
+    };
+    if (data.auto_title) add(data.auto_title);
+    (candidates || []).forEach(c => add(c.czech_title));
+    (data.alternate_titles || []).forEach(add);
+}
+
+async function loadAlias() {
+    setAliasStatus('Načítám…', 'busy');
+    try {
+        const resp = await fetch(`/api/search-alias?source=sonarr&source_id=${seriesId}`);
+        const data = await resp.json();
+        if (!data.success) { setAliasStatus(data.error || 'Chyba načtení', 'err'); return; }
+        aliasLoaded = true;
+        document.getElementById('alias-original').textContent = data.original_title || seriesTitle;
+        document.getElementById('alias-auto').textContent = data.auto_title || '– (zatím nedohledáno)';
+        document.getElementById('alias-input').value = data.custom_title || '';
+        renderAliasChips(data, null);
+        setAliasStatus('');
+    } catch (e) {
+        setAliasStatus(`Chyba: ${e.message}`, 'err');
+    }
+}
+
+async function detectAlias() {
+    const btn = document.getElementById('alias-detect-btn');
+    btn.disabled = true;
+    setAliasStatus('Dohledávám na ČSFD…', 'busy');
+    try {
+        const resp = await fetch('/api/search-alias/detect', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({source: 'sonarr', source_id: seriesId})
+        });
+        const data = await resp.json();
+        if (!data.success) { setAliasStatus(data.error || 'ČSFD selhalo', 'err'); return; }
+        document.getElementById('alias-auto').textContent = data.auto_title || '– (nenalezeno)';
+        renderAliasChips({auto_title: data.auto_title, alternate_titles: []}, data.candidates);
+        setAliasStatus(data.auto_title
+            ? `ČSFD našlo: ${data.auto_title}` : 'ČSFD nic nenašlo', data.auto_title ? 'ok' : 'err');
+    } catch (e) {
+        setAliasStatus(`Chyba: ${e.message}`, 'err');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function saveAlias() {
+    const btn = document.getElementById('alias-save-btn');
+    btn.disabled = true;
+    setAliasStatus('Ukládám…', 'busy');
+    try {
+        const resp = await fetch('/api/search-alias', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                source: 'sonarr',
+                source_id: seriesId,
+                custom_title: document.getElementById('alias-input').value
+            })
+        });
+        const data = await resp.json();
+        if (!data.success) { setAliasStatus(data.error || 'Uložení selhalo', 'err'); return; }
+        setAliasStatus(data.custom_title
+            ? `Uloženo. Hledání teď použije i „${data.custom_title}".`
+            : 'Vlastní název smazán.', 'ok');
+    } catch (e) {
+        setAliasStatus(`Chyba: ${e.message}`, 'err');
+    } finally {
+        btn.disabled = false;
+    }
+}
 
 // Toast notification function
 function showToast(message, type = 'success') {

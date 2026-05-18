@@ -1,10 +1,83 @@
 """Search orchestration service"""
 import logging
-from datetime import datetime
-from models.database import SearchCache, PendingConfirmation, get_db_session
-from services import webshare, parser, sonarr, radarr
+import re
+from datetime import datetime, timedelta
+from models.database import (
+    SearchCache, PendingConfirmation, SearchAlias, get_or_create_alias,
+    get_db_session,
+)
+from services import webshare, parser, sonarr, radarr, csfd
 
 logger = logging.getLogger(__name__)
+
+# Jak často znovu zkoušet ČSFD dohledání, pokud už proběhlo
+CSFD_RECHECK_DAYS = 30
+
+
+def _norm(s):
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+def resolve_extra_titles(item_info):
+    """Doplní do item_info['extra_titles'] vlastní a český (ČSFD) název.
+
+    - Vlastní název (custom_title) zadaný uživatelem má vždy přednost.
+    - Český název se dohledá z ČSFD a uloží do DB (auto_title); znovu se
+      ptáme nejvýš jednou za CSFD_RECHECK_DAYS.
+
+    Vrací seznam názvů navíc (může být prázdný). Nikdy nevyhazuje výjimku.
+    """
+    source = item_info.get('source')
+    source_id = item_info.get('series_id') or item_info.get('movie_id')
+    base_title = item_info.get('series_title') or item_info.get('title') or ''
+    year = item_info.get('series_year') or item_info.get('year')
+    want_series = source == 'sonarr'
+
+    if not source or source_id is None:
+        return []
+
+    db = get_db_session()
+    try:
+        alias = get_or_create_alias(db, source, source_id)
+
+        # Potřebujeme dohledat český název z ČSFD?
+        need_lookup = alias.auto_title is None and (
+            alias.auto_checked_at is None
+            or alias.auto_checked_at < datetime.utcnow() - timedelta(days=CSFD_RECHECK_DAYS)
+        )
+
+        if need_lookup and base_title:
+            try:
+                match = csfd.find_czech_title(
+                    base_title, year=year, want_series=want_series
+                )
+            except Exception as e:
+                logger.warning(f"ČSFD dohledání selhalo pro '{base_title}': {e}")
+                match = None
+
+            alias.auto_checked_at = datetime.utcnow()
+            if match and match.get('czech_title'):
+                czech = match['czech_title'].strip()
+                # Ukládej jen pokud se liší od původního názvu
+                if _norm(czech) and _norm(czech) != _norm(base_title):
+                    alias.auto_title = czech
+            db.commit()
+
+        # Sestav názvy navíc, vyřaď shodné s původním názvem
+        extra = [
+            t for t in alias.effective_titles()
+            if _norm(t) and _norm(t) != _norm(base_title)
+        ]
+        return extra
+    except Exception as e:
+        logger.warning(f"resolve_extra_titles selhalo: {e}")
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return []
+    finally:
+        db.close()
 
 
 def search_with_cache(query, force_refresh=False):
@@ -68,6 +141,10 @@ def search_for_item(item_info, top_n=5):
         list: Ranked top results
     """
     source = item_info.get('source')
+
+    # Doplň vlastní / český (ČSFD) název pro hledání
+    if not item_info.get('extra_titles'):
+        item_info['extra_titles'] = resolve_extra_titles(item_info)
 
     # Generate queries
     if source == 'sonarr':

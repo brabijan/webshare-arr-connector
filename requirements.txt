@@ -6,3 +6,4 @@ SQLAlchemy==2.0.23
 python-dotenv==1.0.0
 APScheduler==3.10.4
 plexapi==4.15.6
+beautifulsoup4==4.12.3

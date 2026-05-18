@@ -178,9 +178,30 @@ class RadarrClient:
             'folder_path': movie.get('folderPath')
         }
 
+    @staticmethod
+    def _movie_query_variants(title, year=None):
+        """Varianty dotazu pro jeden název filmu."""
+        if year:
+            return [
+                f"{title} {year}",
+                f"{title.replace(' ', '.')} {year}",
+                title,
+                f"{title} ({year})",
+                f"{title.replace(' ', '.')}.{year}",
+            ]
+        return [
+            title,
+            title.replace(' ', '.'),
+        ]
+
     def generate_search_queries(self, item_info):
         """
         Generate multiple search query variations for a movie
+
+        Generuje varianty jak pro původní (anglický) název z Radarru, tak
+        pro případné další názvy v ``item_info['extra_titles']`` (vlastní
+        uživatelův název / český název z ČSFD). Názvy navíc jdou první, aby
+        se na Webshare hledaly přednostně.
 
         Args:
             item_info (dict): Parsed item information
@@ -196,30 +217,19 @@ class RadarrClient:
             logger.warning("Missing title for query generation")
             return queries
 
-        # Primary query: "Movie Title Year"
-        if year:
-            queries.append(f"{title} {year}")
-        else:
-            queries.append(title)
+        extra_titles = item_info.get('extra_titles') or []
 
-        # Variation with dots instead of spaces
-        if year:
-            queries.append(f"{title.replace(' ', '.')} {year}")
-        else:
-            queries.append(title.replace(' ', '.'))
+        for t in [*extra_titles, title]:
+            if not t or not str(t).strip():
+                continue
+            for q in self._movie_query_variants(str(t).strip(), year):
+                if q not in queries:
+                    queries.append(q)
 
-        # Without year (for wider search)
-        queries.append(title)
-
-        # With parentheses around year
-        if year:
-            queries.append(f"{title} ({year})")
-
-        # Alternative: dot separated with year
-        if year:
-            queries.append(f"{title.replace(' ', '.')}.{year}")
-
-        logger.info(f"Generated {len(queries)} search queries for {title} ({year})")
+        logger.info(
+            f"Generated {len(queries)} search queries for {title} ({year})"
+            + (f" (+{len(extra_titles)} alt názvů)" if extra_titles else "")
+        )
         return queries
 
     def trigger_movie_rescan(self, movie_id):

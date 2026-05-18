@@ -237,9 +237,27 @@ class SonarrClient:
             'air_date': episode.get('airDate')
         }
 
+    @staticmethod
+    def _episode_query_variants(title, season, episode, year=None):
+        """Varianty dotazu pro jeden název seriálu."""
+        variants = [
+            f"{title} S{season:02d}E{episode:02d}",
+            f"{title} S{season:02d}E{episode:02d}".replace(" S", "S"),
+            f"{title.replace(' ', '.')} S{season:02d}E{episode:02d}",
+            f"{title} {season}x{episode:02d}",
+        ]
+        if year:
+            variants.insert(3, f"{title} {year} S{season:02d}E{episode:02d}")
+        return variants
+
     def generate_search_queries(self, item_info):
         """
         Generate multiple search query variations for an episode
+
+        Generuje varianty jak pro původní (anglický) název ze Sonarru, tak
+        pro případné další názvy v ``item_info['extra_titles']`` (vlastní
+        uživatelův název / český název z ČSFD). Názvy navíc jdou první, aby
+        se na Webshare hledaly přednostně.
 
         Args:
             item_info (dict): Parsed item information
@@ -256,23 +274,21 @@ class SonarrClient:
             logger.warning("Missing title or episode info for query generation")
             return queries
 
-        # Primary query: "Series Title S01E01"
-        queries.append(f"{title} S{season:02d}E{episode:02d}")
+        year = item_info.get('series_year')
+        extra_titles = item_info.get('extra_titles') or []
 
-        # Variation without spaces in S/E
-        queries.append(f"{title} S{season:02d}E{episode:02d}".replace(" S", "S"))
+        for t in [*extra_titles, title]:
+            if not t or not str(t).strip():
+                continue
+            for q in self._episode_query_variants(str(t).strip(), season, episode, year):
+                if q not in queries:
+                    queries.append(q)
 
-        # Variation with dots instead of spaces
-        queries.append(f"{title.replace(' ', '.')} S{season:02d}E{episode:02d}")
-
-        # With year if available
-        if item_info.get('series_year'):
-            queries.append(f"{title} {item_info['series_year']} S{season:02d}E{episode:02d}")
-
-        # Alternative format: "Series Title 1x01"
-        queries.append(f"{title} {season}x{episode:02d}")
-
-        logger.info(f"Generated {len(queries)} search queries for {title} S{season:02d}E{episode:02d}")
+        logger.info(
+            f"Generated {len(queries)} search queries for "
+            f"{title} S{season:02d}E{episode:02d}"
+            + (f" (+{len(extra_titles)} alt názvů)" if extra_titles else "")
+        )
         return queries
 
     def get_episode_file(self, episode_file_id):

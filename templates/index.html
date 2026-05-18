@@ -34,6 +34,41 @@
     </div>
 </div>
 
+<!-- Modal: hledání filmu s vyhledávacím názvem -->
+<div id="movie-search-modal" class="ms-modal" style="display: none;">
+    <div class="ms-modal-content">
+        <span class="ms-close" onclick="closeMovieModal()">&times;</span>
+        <h2 id="ms-title" style="margin-top: 0;">Hledat film</h2>
+        <p class="alias-hint">
+            Radarr zná film pod tímhle názvem, ale na Webshare bývá český
+            obsah pod českým názvem. Můžeš zadat vlastní název nebo si nechat
+            dohledat český název z ČSFD. Hledá se <strong>navíc</strong>
+            k původnímu názvu.
+        </p>
+
+        <div class="alias-row">
+            <span class="alias-label">Český (ČSFD):</span>
+            <span id="ms-auto" class="alias-value">–</span>
+            <button class="btn btn-small" onclick="msDetect()" id="ms-detect-btn">Dohledat z ČSFD</button>
+        </div>
+
+        <div id="ms-chips" class="alias-chips"></div>
+
+        <div class="alias-input-row">
+            <input type="text" id="ms-input" class="alias-input"
+                   placeholder="Vlastní vyhledávací název (volitelné)…"/>
+        </div>
+        <div id="ms-status" class="alias-status"></div>
+
+        <div id="ms-actions" style="margin-top: 18px; display: flex; gap: 10px;">
+            <button class="btn" onclick="msSearch()" id="ms-search-btn">Hledat na Webshare</button>
+            <button class="btn btn-secondary" onclick="closeMovieModal()">Zrušit</button>
+        </div>
+
+        <div id="ms-results" style="margin-top: 18px;"></div>
+    </div>
+</div>
+
 <style>
 /* Tab Navigation */
 .tabs {
@@ -164,6 +199,167 @@
 .empty-state h3 {
     margin-bottom: 10px;
 }
+
+/* Movie search modal */
+.ms-modal {
+    position: fixed;
+    z-index: 1000;
+    left: 0; top: 0;
+    width: 100%; height: 100%;
+    overflow: auto;
+    background: rgba(0,0,0,0.7);
+}
+
+.ms-modal-content {
+    background: #1a1a1a;
+    margin: 6% auto;
+    padding: 30px;
+    border: 1px solid #333;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 640px;
+}
+
+.ms-close {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.ms-close:hover { color: #fff; }
+
+.btn {
+    padding: 10px 20px;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.2s;
+}
+
+.btn:hover { background: #45a049; }
+.btn:disabled { background: #666; cursor: not-allowed; }
+
+.btn-secondary { background: #333; }
+.btn-secondary:hover { background: #444; }
+
+.btn-small { padding: 6px 12px; font-size: 13px; }
+
+.alias-hint {
+    color: #aaa;
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 16px;
+}
+
+.alias-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.alias-label {
+    color: #4CAF50;
+    font-weight: bold;
+    min-width: 110px;
+}
+
+.alias-value { color: #fff; }
+
+.alias-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 12px 0;
+}
+
+.alias-chip {
+    background: #2a2a2a;
+    border: 1px solid #444;
+    color: #ddd;
+    padding: 5px 12px;
+    border-radius: 14px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.alias-chip:hover {
+    background: #4CAF50;
+    color: #fff;
+    border-color: #4CAF50;
+}
+
+.alias-input-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+}
+
+.alias-input {
+    flex: 1;
+    padding: 10px 12px;
+    background: #0f0f0f;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #fff;
+    font-size: 14px;
+}
+
+.alias-input:focus { outline: none; border-color: #4CAF50; }
+
+.alias-status {
+    margin-top: 10px;
+    font-size: 13px;
+    min-height: 18px;
+}
+
+.alias-status.ok { color: #4CAF50; }
+.alias-status.err { color: #f44336; }
+.alias-status.busy { color: #999; }
+
+.ms-modal-content { max-height: 85vh; overflow-y: auto; }
+
+.ms-result {
+    background: #252525;
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 10px;
+}
+
+.ms-result-name {
+    font-size: 14px;
+    color: #fff;
+    margin-bottom: 8px;
+    word-break: break-word;
+}
+
+.ms-result-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.ms-badge {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    color: #fff;
+}
+
+.ms-badge.q { background: #2196F3; }
+.ms-badge.cz { background: #FF5722; }
+.ms-badge.l { background: #9C27B0; }
+.ms-badge.s { background: #607D8B; }
+.ms-badge.sc { background: #4CAF50; }
 </style>
 
 <script>
@@ -330,36 +526,192 @@ function renderMovies(movies) {
     });
 }
 
-// Search for movie
+// ===== Hledání filmu s vyhledávacím názvem =====
+let msMovie = null;
+
+function setMsStatus(msg, cls) {
+    const el = document.getElementById('ms-status');
+    el.textContent = msg || '';
+    el.className = 'alias-status' + (cls ? ' ' + cls : '');
+}
+
+function msRenderChips(data, candidates) {
+    const wrap = document.getElementById('ms-chips');
+    wrap.innerHTML = '';
+    const seen = new Set();
+    const add = (label) => {
+        if (!label) return;
+        const key = label.trim().toLowerCase();
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        const chip = document.createElement('span');
+        chip.className = 'alias-chip';
+        chip.textContent = label;
+        chip.title = 'Vyplnit do pole';
+        chip.onclick = () => { document.getElementById('ms-input').value = label; };
+        wrap.appendChild(chip);
+    };
+    if (data.auto_title) add(data.auto_title);
+    (candidates || []).forEach(c => add(c.czech_title));
+    (data.alternate_titles || []).forEach(add);
+}
+
+function closeMovieModal() {
+    document.getElementById('movie-search-modal').style.display = 'none';
+}
+
 async function searchMovie(movie) {
-    if (!confirm(`Search Webshare for "${movie.title}" (${movie.year})?`)) {
-        return;
-    }
+    msMovie = movie;
+    document.getElementById('ms-title').textContent =
+        `Hledat: ${movie.title}${movie.year ? ' (' + movie.year + ')' : ''}`;
+    document.getElementById('ms-input').value = '';
+    document.getElementById('ms-auto').textContent = '–';
+    document.getElementById('ms-chips').innerHTML = '';
+    setMsStatus('Načítám…', 'busy');
+    document.getElementById('movie-search-modal').style.display = 'block';
 
     try {
+        const resp = await fetch(`/api/search-alias?source=radarr&source_id=${movie.id}`);
+        const data = await resp.json();
+        if (data.success) {
+            document.getElementById('ms-auto').textContent =
+                data.auto_title || '– (zatím nedohledáno)';
+            document.getElementById('ms-input').value = data.custom_title || '';
+            msRenderChips(data, null);
+            setMsStatus('');
+        } else {
+            setMsStatus(data.error || 'Chyba načtení', 'err');
+        }
+    } catch (e) {
+        setMsStatus(`Chyba: ${e.message}`, 'err');
+    }
+}
+
+async function msDetect() {
+    const btn = document.getElementById('ms-detect-btn');
+    btn.disabled = true;
+    setMsStatus('Dohledávám na ČSFD…', 'busy');
+    try {
+        const resp = await fetch('/api/search-alias/detect', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({source: 'radarr', source_id: msMovie.id})
+        });
+        const data = await resp.json();
+        if (!data.success) { setMsStatus(data.error || 'ČSFD selhalo', 'err'); return; }
+        document.getElementById('ms-auto').textContent = data.auto_title || '– (nenalezeno)';
+        msRenderChips({auto_title: data.auto_title, alternate_titles: []}, data.candidates);
+        setMsStatus(data.auto_title
+            ? `ČSFD našlo: ${data.auto_title}` : 'ČSFD nic nenašlo',
+            data.auto_title ? 'ok' : 'err');
+    } catch (e) {
+        setMsStatus(`Chyba: ${e.message}`, 'err');
+    } finally {
+        btn.disabled = false;
+    }
+}
+
+async function msSearch() {
+    const btn = document.getElementById('ms-search-btn');
+    btn.disabled = true;
+    const customTitle = document.getElementById('ms-input').value;
+    document.getElementById('ms-results').innerHTML = '';
+    setMsStatus('Hledám na Webshare…', 'busy');
+    try {
+        // Ulož vlastní název (i prázdný = smazání), aby ho hledání použilo
+        await fetch('/api/search-alias', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                source: 'radarr',
+                source_id: msMovie.id,
+                custom_title: customTitle
+            })
+        });
+
         const response = await fetch('/api/search-movie', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                movie_id: movie.id,
-                title: movie.title,
-                year: movie.year,
-                path: movie.path
+                movie_id: msMovie.id,
+                title: msMovie.title,
+                year: msMovie.year,
+                path: msMovie.path
             })
         });
-
         const data = await response.json();
 
         if (data.success && data.results_count > 0) {
-            // Redirect to confirmation page
-            window.location.href = `/download/${data.pending_id}`;
+            setMsStatus(`Nalezeno ${data.results_count} výsledků:`, 'ok');
+            msRenderResults(data.results, data.pending_id);
         } else {
-            alert('No results found on Webshare for this movie.');
+            setMsStatus('Na Webshare nic nenalezeno. Zkus jiný název.', 'err');
         }
     } catch (error) {
-        alert(`Error searching movie: ${error.message}`);
+        setMsStatus(`Chyba: ${error.message}`, 'err');
+    } finally {
+        btn.disabled = false;
     }
 }
+
+function msRenderResults(results, pendingId) {
+    const wrap = document.getElementById('ms-results');
+    wrap.innerHTML = '';
+    results.forEach((result, index) => {
+        const parsed = result.parsed || {};
+        const score = result.score || {};
+        const card = document.createElement('div');
+        card.className = 'ms-result';
+        card.innerHTML = `
+            <div class="ms-result-name">${result.name}</div>
+            <div class="ms-result-meta">
+                ${parsed.quality ? `<span class="ms-badge q">${parsed.quality}</span>` : ''}
+                ${parsed.has_czech ? `<span class="ms-badge cz">CZ</span>` : ''}
+                ${parsed.language ? `<span class="ms-badge l">${parsed.language}</span>` : ''}
+                ${result.file_size_gb ? `<span class="ms-badge s">${result.file_size_gb.toFixed(2)} GB</span>` : ''}
+                ${score.total !== undefined ? `<span class="ms-badge sc">Score: ${score.total}</span>` : ''}
+            </div>
+            <button class="btn btn-small" onclick="msDownload(${pendingId}, ${index}, this)">Stáhnout</button>
+        `;
+        wrap.appendChild(card);
+    });
+}
+
+async function msDownload(pendingId, resultIndex, btnEl) {
+    document.querySelectorAll('#ms-results .btn').forEach(b => {
+        b.disabled = true;
+    });
+    if (btnEl) btnEl.textContent = 'Odesílám…';
+    try {
+        const resp = await fetch('/api/confirm', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({pending_id: pendingId, result_index: resultIndex})
+        });
+        const data = await resp.json();
+        if (data.success) {
+            setMsStatus(`✓ Odesláno do pyLoad (Package ID: ${data.package_id})`, 'ok');
+            document.getElementById('ms-results').innerHTML = '';
+            setTimeout(closeMovieModal, 1500);
+        } else {
+            setMsStatus(`Chyba: ${data.error || 'Nepodařilo se odeslat'}`, 'err');
+            document.querySelectorAll('#ms-results .btn').forEach(b => {
+                b.disabled = false; b.textContent = 'Stáhnout';
+            });
+        }
+    } catch (error) {
+        setMsStatus(`Chyba: ${error.message}`, 'err');
+        document.querySelectorAll('#ms-results .btn').forEach(b => {
+            b.disabled = false; b.textContent = 'Stáhnout';
+        });
+    }
+}
+
+// Zavřít modal kliknutím mimo
+window.addEventListener('click', (e) => {
+    const modal = document.getElementById('movie-search-modal');
+    if (e.target === modal) closeMovieModal();
+});
 
 // Load series on page load
 window.addEventListener('DOMContentLoaded', () => {

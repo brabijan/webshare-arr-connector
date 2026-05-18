@@ -281,6 +281,182 @@ def manual_search():
         return jsonify({'error': str(e)}), 500
 
 
+def _get_source_titles(source, source_id):
+    """Vrátí (original_title, year, alternate_titles[]) ze Sonarru/Radarru."""
+    original_title = None
+    year = None
+    alternates = []
+    try:
+        if source == 'sonarr':
+            from services import sonarr
+            series = sonarr.get_client().get_series_by_id(source_id)
+            if series:
+                original_title = series.get('title')
+                year = series.get('year')
+                for alt in series.get('alternateTitles', []) or []:
+                    t = alt.get('title') if isinstance(alt, dict) else None
+                    if t:
+                        alternates.append(t)
+        elif source == 'radarr':
+            from services import radarr
+            movie = radarr.get_client().get_movie_by_id(source_id)
+            if movie:
+                original_title = movie.get('title')
+                year = movie.get('year')
+                if movie.get('originalTitle'):
+                    alternates.append(movie['originalTitle'])
+                for alt in movie.get('alternateTitles', []) or []:
+                    t = alt.get('title') if isinstance(alt, dict) else None
+                    if t:
+                        alternates.append(t)
+    except Exception as e:
+        logger.warning(f"Nelze načíst názvy z {source} #{source_id}: {e}")
+
+    # Deduplikuj, vynech původní název ze seznamu alternativ
+    seen = set()
+    uniq = []
+    for t in alternates:
+        key = (t or '').strip().lower()
+        if t and key and key != (original_title or '').strip().lower() and key not in seen:
+            seen.add(key)
+            uniq.append(t.strip())
+
+    return original_title, year, uniq
+
+
+@api_bp.route('/search-alias', methods=['GET'])
+def get_search_alias():
+    """Vrátí vyhledávací název (vlastní + ČSFD) a alternativy pro titul.
+
+    Query: source=sonarr|radarr, source_id=<id>
+    """
+    try:
+        from models.database import get_alias
+
+        source = request.args.get('source')
+        source_id = request.args.get('source_id', type=int)
+
+        if source not in ('sonarr', 'radarr') or source_id is None:
+            return jsonify({'error': 'source a source_id jsou povinné'}), 400
+
+        original_title, year, alternates = _get_source_titles(source, source_id)
+
+        db = get_db_session()
+        try:
+            alias = get_alias(db, source, source_id)
+            return jsonify({
+                'success': True,
+                'source': source,
+                'source_id': source_id,
+                'original_title': original_title,
+                'year': year,
+                'alternate_titles': alternates,
+                'custom_title': alias.custom_title if alias else None,
+                'auto_title': alias.auto_title if alias else None,
+                'auto_checked_at': (
+                    alias.auto_checked_at.isoformat()
+                    if alias and alias.auto_checked_at else None
+                ),
+            }), 200
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"Error getting search alias: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/search-alias', methods=['POST'])
+def set_search_alias():
+    """Uloží vlastní vyhledávací název.
+
+    Body: {source, source_id, custom_title}. Prázdný custom_title ho smaže.
+    """
+    try:
+        from models.database import get_or_create_alias
+        from datetime import datetime
+
+        data = request.json or {}
+        source = data.get('source')
+        source_id = data.get('source_id')
+        custom_title = (data.get('custom_title') or '').strip()
+
+        if source not in ('sonarr', 'radarr') or source_id is None:
+            return jsonify({'error': 'source a source_id jsou povinné'}), 400
+
+        db = get_db_session()
+        try:
+            alias = get_or_create_alias(db, source, source_id)
+            alias.custom_title = custom_title or None
+            alias.updated_at = datetime.utcnow()
+            db.commit()
+            return jsonify({
+                'success': True,
+                'custom_title': alias.custom_title,
+            }), 200
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"Error setting search alias: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/search-alias/detect', methods=['POST'])
+def detect_search_alias():
+    """Dohledá český název na ČSFD a uloží nejlepší jako auto_title.
+
+    Body: {source, source_id, query?} – query je volitelný (jinak se
+    použije původní název ze Sonarru/Radarru).
+    """
+    try:
+        from models.database import get_or_create_alias
+        from services import csfd
+        from datetime import datetime
+
+        data = request.json or {}
+        source = data.get('source')
+        source_id = data.get('source_id')
+        query = (data.get('query') or '').strip()
+
+        if source not in ('sonarr', 'radarr') or source_id is None:
+            return jsonify({'error': 'source a source_id jsou povinné'}), 400
+
+        original_title, year, _ = _get_source_titles(source, source_id)
+        search_term = query or original_title
+        if not search_term:
+            return jsonify({'error': 'Není co hledat (chybí název)'}), 400
+
+        want_series = source == 'sonarr'
+        candidates = csfd.search(search_term)
+        best = csfd.find_czech_title(
+            search_term, year=year, want_series=want_series
+        )
+
+        db = get_db_session()
+        try:
+            alias = get_or_create_alias(db, source, source_id)
+            alias.auto_checked_at = datetime.utcnow()
+            if best and best.get('czech_title'):
+                alias.auto_title = best['czech_title'].strip()
+            alias.updated_at = datetime.utcnow()
+            db.commit()
+            auto_title = alias.auto_title
+        finally:
+            db.close()
+
+        return jsonify({
+            'success': True,
+            'auto_title': auto_title,
+            'best': best,
+            'candidates': candidates,
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error detecting search alias: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
 @api_bp.route('/history', methods=['GET'])
 def get_history():
     """Get download history"""
